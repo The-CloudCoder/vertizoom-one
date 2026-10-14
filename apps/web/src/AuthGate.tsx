@@ -48,7 +48,7 @@ export default function AuthGate() {
   }
 
   if (checking) return <div className="auth-loading"><LoaderCircle className="auth-spinner" size={28} /><span>Securing your workspace…</span></div>;
-  if (auth) return <App user={auth.user} organization={auth.organizations[0] ?? null} onLogout={() => void logout()} />;
+  if (auth) return <App user={auth.user} organization={auth.organizations[0] ?? null} onLogout={() => void logout()} onOrganizationUpdated={(updated) => setAuth((current) => current ? { ...current, organizations: current.organizations.map((item) => item.id === updated.id ? { ...item, ...updated } : item) } : current)} />;
 
   return <main className="auth-shell">
     <section className="auth-story">

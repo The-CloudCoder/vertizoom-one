@@ -236,6 +236,37 @@ export function createApp() {
     } catch (error) { logger.error({ err: error }, 'Organization creation failed'); return response.status(500).json({ error: 'Unable to create organization' }); }
   });
 
+
+  app.patch('/api/organizations/:organizationId', requireAuth, requireOrganizationRole(MembershipRole.OWNER), async (request, response) => {
+    const organizationId = request.params.organizationId!;
+    const name = cleanName(request.body?.name, 100);
+    if (!name) return response.status(400).json({ error: 'Organization name is required (maximum 100 characters)' });
+    try {
+      const organization = await prisma.organization.update({ where: { id: organizationId }, data: { name } });
+      await prisma.auditEvent.create({ data: { organizationId, actorUserId: request.auth!.userId, action: 'organization.updated', entityType: 'Organization', entityId: organization.id, metadata: { name } } });
+      return response.status(200).json({ organization: { id: organization.id, name: organization.name, slug: organization.slug } });
+    } catch (error) {
+      logger.error({ err: error }, 'Organization update failed');
+      return response.status(500).json({ error: 'Unable to update organization' });
+    }
+  });
+
+  app.get('/api/organizations/:organizationId/audit-events', requireAuth, requireOrganizationRole(), async (request, response) => {
+    const organizationId = request.params.organizationId!;
+    try {
+      const events = await prisma.auditEvent.findMany({
+        where: { organizationId },
+        include: { actor: { select: { name: true, email: true } } },
+        orderBy: { createdAt: 'desc' },
+        take: 50,
+      });
+      return response.status(200).json({ events: events.map(({ id, action, entityType, entityId, metadata, createdAt, actor }) => ({ id, action, entityType, entityId, metadata, createdAt, actor })) });
+    } catch (error) {
+      logger.error({ err: error }, 'Audit history retrieval failed');
+      return response.status(500).json({ error: 'Unable to load audit history' });
+    }
+  });
+
   app.post('/api/organizations/:organizationId/members', requireAuth, requireOrganizationRole(MembershipRole.OWNER, MembershipRole.ADMIN), async (request, response) => {
     const organizationId = request.params.organizationId!;
     const email = normalizeEmail(request.body?.email);
