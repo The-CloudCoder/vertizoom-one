@@ -126,3 +126,37 @@ test('core ERP employee and department access is scoped to the organization', as
   assert.equal(changed.status, 200);
   assert.equal(((await changed.json()) as { employee: { status: string } }).employee.status, 'ON_LEAVE');
 });
+
+
+test('workspace invitations can be created and accepted by a new account', async () => {
+  const owner: Client = {};
+  const login = await request('/api/auth/login', { method: 'POST', body: json({ email: 'owner@example.com', password: 'correct horse battery staple' }) }, owner);
+  assert.equal(login.status, 200);
+  const orgs = (await (await request('/api/organizations', {}, owner)).json() as { organizations: Array<{ id: string }> }).organizations;
+  const organization = orgs[0]!;
+  const inviteResponse = await request(`/api/organizations/${organization.id}/members`, {
+    method: 'POST',
+    body: json({ email: 'new-invite@example.com', role: 'VIEWER' }),
+  }, owner);
+  assert.equal(inviteResponse.status, 201);
+  const inviteBody = await inviteResponse.json() as { invitation: { invitationUrl: string; email: string; role: string; expiresAt: string } };
+  assert.equal(inviteBody.invitation.email, 'new-invite@example.com');
+  assert.equal(inviteBody.invitation.role, 'VIEWER');
+  assert.ok(new Date(inviteBody.invitation.expiresAt).getTime() > Date.now());
+  const token = new URL(inviteBody.invitation.invitationUrl).searchParams.get('invite');
+  assert.ok(token);
+  const signup = await request('/api/auth/signup', {
+    method: 'POST',
+    body: json({ name: 'Invited Person', email: 'new-invite@example.com', password: 'a sufficiently long password', invitationToken: token }),
+  });
+  assert.equal(signup.status, 201);
+  const body = await signup.json() as { organizations: Array<{ id: string; role: string }> };
+  assert.ok(body.organizations.some((item) => item.id === organization.id && item.role === 'VIEWER'));
+  const invitation = await prisma.organizationInvitation.findUnique({ where: { tokenHash: (await import('node:crypto')).createHash('sha256').update(token!).digest('hex') } });
+  assert.ok(invitation?.acceptedAt);
+  const duplicateAcceptance = await request('/api/auth/signup', {
+    method: 'POST',
+    body: json({ name: 'Another Person', email: 'another-invite@example.com', password: 'a sufficiently long password', invitationToken: token }),
+  });
+  assert.equal(duplicateAcceptance.status, 400);
+});
