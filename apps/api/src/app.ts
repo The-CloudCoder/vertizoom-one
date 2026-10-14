@@ -598,7 +598,7 @@ export function createApp() {
     const value=req.body?.estimatedValue==null||req.body.estimatedValue===''?0:Number(req.body.estimatedValue),stage=req.body?.stage??'NEW';
     const source=req.body?.source==null||req.body.source===''?null:cleanName(req.body.source,80),notes=typeof req.body?.notes==='string'?req.body.notes.trim().slice(0,2000)||null:null;
     const close=req.body?.expectedCloseDate?typeof req.body.expectedCloseDate==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(req.body.expectedCloseDate)?new Date(req.body.expectedCloseDate+'T00:00:00.000Z'):undefined:null;
-    if(!title||!Number.isFinite(value)||value<0||value>1000000000||!['NEW','QUALIFIED','PROPOSAL','NEGOTIATION','WON','LOST'].includes(stage)||(req.body?.source&&!source)||close===undefined)return res.status(400).json({error:'Provide a lead title and valid value, stage, source, and close date'});
+    if(!title||!Number.isFinite(value)||value<0||value>21000000||!['NEW','QUALIFIED','PROPOSAL','NEGOTIATION','WON','LOST'].includes(stage)||(req.body?.source&&!source)||close===undefined)return res.status(400).json({error:'Provide a lead title and valid value, stage, source, and close date'});
     try{
       if(customerId&&!await prisma.crmCustomer.findFirst({where:{id:customerId,organizationId},select:{id:true}}))return res.status(400).json({error:'Customer does not belong to this organization'});
       if(contactId&&!await prisma.crmContact.findFirst({where:{id:contactId,organizationId,...(customerId?{customerId}:{})},select:{id:true}}))return res.status(400).json({error:'Contact does not belong to this organization or selected customer'});
@@ -612,7 +612,7 @@ export function createApp() {
     const value=req.body?.estimatedValue==null||req.body.estimatedValue===''?0:Number(req.body.estimatedValue),stage=req.body?.stage;
     const source=req.body?.source==null||req.body.source===''?null:cleanName(req.body.source,80),notes=typeof req.body?.notes==='string'?req.body.notes.trim().slice(0,2000)||null:null;
     const close=req.body?.expectedCloseDate?typeof req.body.expectedCloseDate==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(req.body.expectedCloseDate)?new Date(req.body.expectedCloseDate+'T00:00:00.000Z'):undefined:null;
-    if(!title||!Number.isFinite(value)||value<0||value>1000000000||!['NEW','QUALIFIED','PROPOSAL','NEGOTIATION','WON','LOST'].includes(stage)||(req.body?.source&&!source)||close===undefined)return res.status(400).json({error:'Provide a lead title and valid value, stage, source, and close date'});
+    if(!title||!Number.isFinite(value)||value<0||value>21000000||!['NEW','QUALIFIED','PROPOSAL','NEGOTIATION','WON','LOST'].includes(stage)||(req.body?.source&&!source)||close===undefined)return res.status(400).json({error:'Provide a lead title and valid value, stage, source, and close date'});
     try{
       if(!await prisma.crmLead.findFirst({where:{id:leadId,organizationId},select:{id:true}}))return res.status(404).json({error:'Lead not found'});
       if(customerId&&!await prisma.crmCustomer.findFirst({where:{id:customerId,organizationId},select:{id:true}}))return res.status(400).json({error:'Customer does not belong to this organization'});
