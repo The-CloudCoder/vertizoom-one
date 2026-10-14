@@ -623,6 +623,78 @@ export function createApp() {
   });
 
 
+
+  // ERP starter: organization-scoped invoices and expenses.
+  const erpWriters = [MembershipRole.OWNER, MembershipRole.ADMIN, MembershipRole.MEMBER];
+  const invoiceStatuses = ['DRAFT', 'SENT', 'PAID', 'OVERDUE', 'CANCELLED'];
+  const expenseStatuses = ['PENDING', 'APPROVED', 'PAID'];
+  app.get('/api/organizations/:organizationId/erp/invoices', requireAuth, requireOrganizationRole(), async (req, res) => {
+    try {
+      const invoices = await prisma.erpInvoice.findMany({ where: { organizationId: req.params.organizationId! }, orderBy: { updatedAt: 'desc' }, take: 300 });
+      return res.json({ invoices });
+    } catch (error) { logger.error({ err: error }, 'ERP invoices failed'); return res.status(500).json({ error: 'Unable to load invoices' }); }
+  });
+  app.post('/api/organizations/:organizationId/erp/invoices', requireAuth, requireOrganizationRole(...erpWriters), async (req, res) => {
+    const organizationId = req.params.organizationId!;
+    const invoiceNumber = cleanName(req.body?.invoiceNumber, 50);
+    const customerName = cleanName(req.body?.customerName, 120);
+    const amount = Number(req.body?.amount);
+    const status = req.body?.status ?? 'DRAFT';
+    const dueDate = req.body?.dueDate ? (typeof req.body.dueDate === 'string' && /^\\d{4}-\\d{2}-\\d{2}$/.test(req.body.dueDate) ? new Date(req.body.dueDate + 'T00:00:00.000Z') : undefined) : null;
+    const notes = typeof req.body?.notes === 'string' ? req.body.notes.trim().slice(0, 2000) || null : null;
+    if (!invoiceNumber || !customerName || !Number.isFinite(amount) || amount <= 0 || amount > 21000000 || !invoiceStatuses.includes(status) || dueDate === undefined) return res.status(400).json({ error: 'Provide an invoice number, customer, valid positive amount, status, and due date' });
+    try {
+      const invoice = await prisma.erpInvoice.create({ data: { organizationId, invoiceNumber, customerName, amountCents: Math.round(amount * 100), status, dueDate, notes } });
+      await prisma.auditEvent.create({ data: { organizationId, actorUserId: req.auth!.userId, action: 'erp.invoice_created', entityType: 'ErpInvoice', entityId: invoice.id } });
+      return res.status(201).json({ invoice });
+    } catch (error) {
+      if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'P2002') return res.status(409).json({ error: 'That invoice number already exists in this workspace' });
+      logger.error({ err: error }, 'ERP invoice create failed'); return res.status(500).json({ error: 'Unable to create invoice' });
+    }
+  });
+  app.patch('/api/organizations/:organizationId/erp/invoices/:invoiceId/status', requireAuth, requireOrganizationRole(...erpWriters), async (req, res) => {
+    const organizationId = req.params.organizationId!, invoiceId = req.params.invoiceId!, status = req.body?.status;
+    if (!invoiceStatuses.includes(status)) return res.status(400).json({ error: 'Provide a valid invoice status' });
+    try {
+      const existing = await prisma.erpInvoice.findFirst({ where: { id: invoiceId, organizationId }, select: { id: true } });
+      if (!existing) return res.status(404).json({ error: 'Invoice not found' });
+      const invoice = await prisma.erpInvoice.update({ where: { id: invoiceId }, data: { status } });
+      await prisma.auditEvent.create({ data: { organizationId, actorUserId: req.auth!.userId, action: 'erp.invoice_status_changed', entityType: 'ErpInvoice', entityId: invoice.id, metadata: { status } } });
+      return res.json({ invoice });
+    } catch (error) { logger.error({ err: error }, 'ERP invoice status update failed'); return res.status(500).json({ error: 'Unable to update invoice status' }); }
+  });
+  app.get('/api/organizations/:organizationId/erp/expenses', requireAuth, requireOrganizationRole(), async (req, res) => {
+    try {
+      const expenses = await prisma.erpExpense.findMany({ where: { organizationId: req.params.organizationId! }, orderBy: { incurredAt: 'desc' }, take: 300 });
+      return res.json({ expenses });
+    } catch (error) { logger.error({ err: error }, 'ERP expenses failed'); return res.status(500).json({ error: 'Unable to load expenses' }); }
+  });
+  app.post('/api/organizations/:organizationId/erp/expenses', requireAuth, requireOrganizationRole(...erpWriters), async (req, res) => {
+    const organizationId = req.params.organizationId!;
+    const title = cleanName(req.body?.title, 140), category = cleanName(req.body?.category, 80);
+    const vendor = req.body?.vendor == null || req.body.vendor === '' ? null : cleanName(req.body.vendor, 120);
+    const amount = Number(req.body?.amount), status = req.body?.status ?? 'PENDING';
+    const incurredAt = req.body?.incurredAt ? (typeof req.body.incurredAt === 'string' && /^\\d{4}-\\d{2}-\\d{2}$/.test(req.body.incurredAt) ? new Date(req.body.incurredAt + 'T00:00:00.000Z') : undefined) : new Date();
+    const notes = typeof req.body?.notes === 'string' ? req.body.notes.trim().slice(0, 2000) || null : null;
+    if (!title || !category || (req.body?.vendor && !vendor) || !Number.isFinite(amount) || amount <= 0 || amount > 21000000 || !expenseStatuses.includes(status) || incurredAt === undefined) return res.status(400).json({ error: 'Provide an expense title, category, valid amount, status, and date' });
+    try {
+      const expense = await prisma.erpExpense.create({ data: { organizationId, title, category, vendor, amountCents: Math.round(amount * 100), status, incurredAt, notes } });
+      await prisma.auditEvent.create({ data: { organizationId, actorUserId: req.auth!.userId, action: 'erp.expense_created', entityType: 'ErpExpense', entityId: expense.id } });
+      return res.status(201).json({ expense });
+    } catch (error) { logger.error({ err: error }, 'ERP expense create failed'); return res.status(500).json({ error: 'Unable to create expense' }); }
+  });
+  app.patch('/api/organizations/:organizationId/erp/expenses/:expenseId/status', requireAuth, requireOrganizationRole(...erpWriters), async (req, res) => {
+    const organizationId = req.params.organizationId!, expenseId = req.params.expenseId!, status = req.body?.status;
+    if (!expenseStatuses.includes(status)) return res.status(400).json({ error: 'Provide a valid expense status' });
+    try {
+      const existing = await prisma.erpExpense.findFirst({ where: { id: expenseId, organizationId }, select: { id: true } });
+      if (!existing) return res.status(404).json({ error: 'Expense not found' });
+      const expense = await prisma.erpExpense.update({ where: { id: expenseId }, data: { status } });
+      await prisma.auditEvent.create({ data: { organizationId, actorUserId: req.auth!.userId, action: 'erp.expense_status_changed', entityType: 'ErpExpense', entityId: expense.id, metadata: { status } } });
+      return res.json({ expense });
+    } catch (error) { logger.error({ err: error }, 'ERP expense status update failed'); return res.status(500).json({ error: 'Unable to update expense status' }); }
+  });
+
   app.use((_request, response) => response.status(404).json({ error: 'Not found' }));
   return app;
 }
