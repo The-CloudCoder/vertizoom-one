@@ -224,3 +224,22 @@ button:disabled { cursor: not-allowed; opacity: .58; }
  .erp-search { width:130px; }
  .erp-heading { flex-direction:column; }
 }
+
+
+/* Company profile and invoice defaults */
+.company-profile-card .company-settings-form{display:block}
+.company-settings-section{margin:24px 0 12px;padding-top:18px;border-top:1px solid #e9eef4}
+.company-settings-section:first-of-type{margin-top:8px;padding-top:0;border-top:0}
+.company-settings-section h3{margin:0 0 5px;color:#203b55;font:800 13px Manrope,sans-serif;letter-spacing:-.15px}
+.company-settings-section p{margin:0;color:#8290a0;font-size:11px;line-height:1.6}
+.company-settings-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:15px}
+.company-settings-grid label{display:flex;flex-direction:column;gap:7px;min-width:0;color:#53667a;font-size:11px;font-weight:700}
+.company-settings-grid input,.company-settings-grid select,.company-settings-grid textarea{width:100%;min-width:0;border:1px solid #dce4ed;border-radius:8px;background:#fff;padding:10px 11px;color:#243a50;font:500 12px 'DM Sans',sans-serif;outline:none}
+.company-settings-grid input:focus,.company-settings-grid select:focus,.company-settings-grid textarea:focus{border-color:#5a9ed0;box-shadow:0 0 0 3px #4c98cf18}
+.company-settings-grid input:disabled,.company-settings-grid select:disabled,.company-settings-grid textarea:disabled{background:#f5f7fa;color:#7b8997}
+.company-settings-grid small{color:#8896a5;font-size:10px;font-weight:400;line-height:1.4}
+.company-settings-wide{grid-column:1/-1}
+.company-settings-actions{margin-top:22px;padding-top:17px;border-top:1px solid #e9eef4;align-items:center}
+.company-settings-actions span{max-width:460px;line-height:1.6}
+.company-settings-actions button{display:inline-flex;align-items:center;justify-content:center;gap:7px;white-space:nowrap}
+@media(max-width:720px){.company-settings-grid{grid-template-columns:minmax(0,1fr)}.company-settings-wide{grid-column:auto}.company-settings-actions{align-items:stretch;flex-direction:column}.company-settings-actions button{width:100%}}
