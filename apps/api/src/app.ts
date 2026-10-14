@@ -640,7 +640,7 @@ export function createApp() {
     const customerName = cleanName(req.body?.customerName, 120);
     const amount = Number(req.body?.amount);
     const status = req.body?.status ?? 'DRAFT';
-    const dueDate = req.body?.dueDate ? (typeof req.body.dueDate === 'string' && /^\\d{4}-\\d{2}-\\d{2}$/.test(req.body.dueDate) ? new Date(req.body.dueDate + 'T00:00:00.000Z') : undefined) : null;
+    const dueDate = req.body?.dueDate ? (typeof req.body.dueDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.body.dueDate) ? new Date(req.body.dueDate + 'T00:00:00.000Z') : undefined) : null;
     const notes = typeof req.body?.notes === 'string' ? req.body.notes.trim().slice(0, 2000) || null : null;
     if (!invoiceNumber || !customerName || !Number.isFinite(amount) || amount <= 0 || amount > 21000000 || !invoiceStatuses.includes(status) || dueDate === undefined) return res.status(400).json({ error: 'Provide an invoice number, customer, valid positive amount, status, and due date' });
     try {
@@ -674,7 +674,7 @@ export function createApp() {
     const title = cleanName(req.body?.title, 140), category = cleanName(req.body?.category, 80);
     const vendor = req.body?.vendor == null || req.body.vendor === '' ? null : cleanName(req.body.vendor, 120);
     const amount = Number(req.body?.amount), status = req.body?.status ?? 'PENDING';
-    const incurredAt = req.body?.incurredAt ? (typeof req.body.incurredAt === 'string' && /^\\d{4}-\\d{2}-\\d{2}$/.test(req.body.incurredAt) ? new Date(req.body.incurredAt + 'T00:00:00.000Z') : undefined) : new Date();
+    const incurredAt = req.body?.incurredAt ? (typeof req.body.incurredAt === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.body.incurredAt) ? new Date(req.body.incurredAt + 'T00:00:00.000Z') : undefined) : new Date();
     const notes = typeof req.body?.notes === 'string' ? req.body.notes.trim().slice(0, 2000) || null : null;
     if (!title || !category || (req.body?.vendor && !vendor) || !Number.isFinite(amount) || amount <= 0 || amount > 21000000 || !expenseStatuses.includes(status) || incurredAt === undefined) return res.status(400).json({ error: 'Provide an expense title, category, valid amount, status, and date' });
     try {
