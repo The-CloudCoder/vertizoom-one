@@ -33,3 +33,17 @@ To remove the local database volume as well (this permanently deletes the local 
 ```bash
 docker compose down -v
 ```
+
+## Authentication and tenant-isolation tests
+
+The auth integration tests deliberately delete and recreate test data. **Never point them at your development or production database.** Create a dedicated local database and environment file:
+
+```bash
+docker compose exec postgres psql -U postgres -d postgres -c "CREATE DATABASE vertizoom_one_test;"
+cp .env.test.example .env.test
+npm run test:auth
+```
+
+The `.env.test` file is local-only and ignored by Git. The test command refuses to run unless `DATABASE_URL` contains `vertizoom_one_test`. Tests cover signup, password hashing, login/logout, sessions, tenant isolation, membership roles, and origin checks.
+
+Signup creates the first organization and makes the registering user its OWNER. Organization member management currently supports adding an existing account as MEMBER or VIEWER; email invitations and ownership transfer are not implemented yet. Configure HTTPS in production so session cookies use the Secure attribute.

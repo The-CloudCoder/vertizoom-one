@@ -15,6 +15,20 @@ permissions:
 jobs:
   validate:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: vertizoom_one
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d vertizoom_one"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -25,13 +39,22 @@ jobs:
           node-version: 20
 
       - name: Configure CI environment
-        run: printf 'DATABASE_URL=postgresql://postgres:postgres@localhost:5432/vertizoom_one?schema=public\n' > .env
+        run: |
+          printf 'DATABASE_URL=postgresql://postgres:postgres@localhost:5432/vertizoom_one?schema=public\n' > .env
+          printf 'DATABASE_URL=postgresql://postgres:postgres@localhost:5432/vertizoom_one_test?schema=public\nNODE_ENV=test\nWEB_ORIGIN=http://localhost:5173\nLOG_LEVEL=error\n' > .env.test
+          PGPASSWORD=postgres psql -h localhost -U postgres -d postgres -c 'CREATE DATABASE vertizoom_one_test;'
 
       - name: Install dependencies
         run: npm install
+
+      - name: Apply development database migrations
+        run: npm run db:deploy
 
       - name: Build all workspaces
         run: npm run build
 
       - name: Type-check all workspaces
         run: npm run typecheck
+
+      - name: Run authentication and tenant-isolation tests
+        run: npm run test:auth

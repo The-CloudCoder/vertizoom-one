@@ -16,7 +16,8 @@
     "db:migrate": "npm run migrate:dev -w @vertizoom/database",
     "db:deploy": "npm run migrate:deploy -w @vertizoom/database",
     "db:studio": "npm run studio -w @vertizoom/database",
-    "postinstall": "npm run db:generate"
+    "postinstall": "npm run db:generate",
+    "test:auth": "npm run build -w @vertizoom/database && dotenv -e .env.test -- npm run db:deploy && dotenv -e .env.test -- npm run test -w @vertizoom/api"
   },
   "devDependencies": {
     "concurrently": "^9.1.2",

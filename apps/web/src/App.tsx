@@ -3,7 +3,7 @@ import {
   Activity, ArrowDownRight, ArrowUpRight, Bell, Bot, BriefcaseBusiness,
   CalendarDays, ChartNoAxesCombined, ChevronDown, CircleHelp, Command,
   CreditCard, LayoutDashboard, Menu, Search, Settings2, ShieldCheck,
-  Users, X, Zap
+  Users, X, Zap, LogOut
 } from 'lucide-react';
 
 const modules = [
@@ -28,7 +28,10 @@ const activities = [
   { title: 'Monthly report is ready', detail: 'Business overview · Insights', time: '2 hours ago', color: 'amber' },
 ];
 
-function App() {
+type AppProps = { user: { id: string; name: string | null; email: string }; organization: { id: string; name: string; slug: string; role: string } | null; onLogout: () => void; };
+
+function App({ user, organization, onLogout }: AppProps) {
+  const displayName = user.name?.trim().split(/\s+/)[0] || 'there';
   const [menuOpen, setMenuOpen] = useState(false);
   const [activeNav, setActiveNav] = useState('Overview');
   const [apiStatus, setApiStatus] = useState<'checking' | 'online' | 'offline'>('checking');
@@ -63,7 +66,7 @@ function App() {
 
         <button className="workspace-switch">
           <div className="workspace-avatar">V</div>
-          <div className="workspace-copy"><strong>Vertizoom Workspace</strong><span>Free plan</span></div>
+          <div className="workspace-copy"><strong>{organization?.name ?? 'Your workspace'}</strong><span>Free plan</span></div>
           <ChevronDown size={16} className="muted-icon" />
         </button>
 
@@ -90,7 +93,7 @@ function App() {
         <div className="sidebar-bottom">
           <div className="help-card"><div className="help-icon"><CircleHelp size={18} /></div><strong>Need a hand?</strong><p>Explore the platform and get started.</p><button onClick={() => setActiveNav('Help & Support')}>Visit help center <span>↗</span></button></div>
           <button className="nav-item" onClick={() => setActiveNav('Settings')}><Settings2 size={18} /><span>Settings</span></button>
-          <div className="user-profile"><div className="profile-avatar">VR</div><div className="profile-copy"><strong>Workspace Admin</strong><span>admin@vertizoom.com</span></div><ChevronDown size={16} className="muted-icon" /></div>
+          <div className="user-profile"><div className="profile-avatar">VR</div><div className="profile-copy"><strong>{user.name ?? 'Workspace member'}</strong><span>{user.email}</span></div><ChevronDown size={16} className="muted-icon" /></div>
         </div>
       </aside>
 
@@ -106,13 +109,13 @@ function App() {
             <div className="search-box"><Search size={16} /><input aria-label="Search" placeholder="Search anything..." /><kbd>⌘ K</kbd></div>
             <button className="icon-button notification-button" aria-label="Notifications"><Bell size={19} /><i /></button>
             <div className="topbar-divider" />
-            <button className="profile-avatar top-avatar" aria-label="Account menu">VR</button>
+            <button className="profile-avatar top-avatar" aria-label="Account">{(user.name ?? user.email).slice(0, 2).toUpperCase()}</button><button className="icon-button" onClick={onLogout} aria-label="Sign out" title="Sign out"><LogOut size={18} /></button>
           </div>
         </header>
 
         <div className="page-content">
           <section className="welcome-row">
-            <div><div className="eyebrow"><span className="eyebrow-dot" /> YOUR BUSINESS, AT A GLANCE</div><h1>Good morning, Admin <span>✦</span></h1><p>Here's what's happening across your workspace today.</p></div>
+            <div><div className="eyebrow"><span className="eyebrow-dot" /> YOUR BUSINESS, AT A GLANCE</div><h1>Good morning, {displayName} <span>✦</span></h1><p>Here's what's happening across your workspace today.</p></div>
             <button className="date-pill"><CalendarDays size={16} /> October 14, 2026 <ChevronDown size={15} /></button>
           </section>
 
