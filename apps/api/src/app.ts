@@ -384,7 +384,7 @@ export function createApp() {
     const jobTitle = request.body?.jobTitle == null || request.body?.jobTitle === '' ? null : cleanName(request.body.jobTitle, 100);
     const departmentId = request.body?.departmentId == null || request.body?.departmentId === '' ? null : request.body.departmentId;
     const startDateValue = request.body?.startDate;
-    const startDate = startDateValue == null || startDateValue === '' ? null : typeof startDateValue === 'string' && /^\\d{4}-\\d{2}-\\d{2}$/.test(startDateValue) ? new Date(startDateValue + 'T00:00:00.000Z') : undefined;
+    const startDate = startDateValue == null || startDateValue === '' ? null : typeof startDateValue === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(startDateValue) ? new Date(startDateValue + 'T00:00:00.000Z') : undefined;
     if (!employeeCode || !firstName || !lastName || (request.body?.workEmail && !workEmail) || (request.body?.jobTitle && !jobTitle) || startDate === undefined) return response.status(400).json({ error: 'Provide an employee code, first name, last name, and valid optional fields' });
     try {
       const existing = await prisma.employee.findFirst({ where: { id: employeeId, organizationId }, select: { id: true } });
