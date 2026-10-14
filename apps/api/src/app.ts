@@ -167,26 +167,47 @@ export function createApp() {
     const email = normalizeEmail(request.body?.email);
     const password = request.body?.password;
     const organizationName = cleanName(request.body?.organizationName, 100);
-    if (!name || !email || typeof password !== 'string' || password.length < PASSWORD_MIN_LENGTH || password.length > 128 || !organizationName) {
-      return response.status(400).json({ error: 'Provide a valid name, email, organization name, and password of at least 12 characters.' });
+    const invitationToken = typeof request.body?.invitationToken === 'string' ? request.body.invitationToken : '';
+    if (!name || !email || typeof password !== 'string' || password.length < PASSWORD_MIN_LENGTH || password.length > 128 || (!organizationName && !invitationToken)) {
+      return response.status(400).json({ error: 'Provide a valid name, email, and password of at least 12 characters. Organization name is required unless you are accepting an invitation.' });
     }
     try {
       const existing = await prisma.user.findUnique({ where: { email }, select: { id: true } });
-      if (existing) return response.status(409).json({ error: 'An account with this email already exists' });
+      if (existing) return response.status(409).json({ error: 'An account with this email already exists. Sign in to accept the invitation.' });
+      let invitation: { id: string; organizationId: string; email: string; role: MembershipRole; expiresAt: Date; acceptedAt: Date | null; revokedAt: Date | null } | null = null;
+      if (invitationToken) {
+        invitation = await prisma.organizationInvitation.findUnique({ where: { tokenHash: hashToken(invitationToken) }, select: { id: true, organizationId: true, email: true, role: true, expiresAt: true, acceptedAt: true, revokedAt: true } });
+        if (!invitation || invitation.email !== email || invitation.expiresAt <= new Date() || invitation.acceptedAt || invitation.revokedAt) {
+          return response.status(400).json({ error: 'This invitation is invalid, expired, or was sent to a different email address.' });
+        }
+      }
       const passwordHash = await hashPassword(password);
-      const slug = `${slugify(organizationName)}-${randomBytes(3).toString('hex')}`;
-      const token = randomBytes(32).toString('base64url');
+      const slug = organizationName ? `${slugify(organizationName)}-${randomBytes(3).toString('hex')}` : '';
+      const sessionToken = randomBytes(32).toString('base64url');
       const result = await prisma.$transaction(async (tx) => {
         const user = await tx.user.create({ data: { name, email, passwordHash } });
-        const organization = await tx.organization.create({ data: { name: organizationName, slug } });
-        await tx.organizationMember.create({ data: { organizationId: organization.id, userId: user.id, role: MembershipRole.OWNER } });
-        await tx.auditEvent.create({ data: { organizationId: organization.id, actorUserId: user.id, action: 'organization.created', entityType: 'Organization', entityId: organization.id } });
-        await tx.session.create({ data: { userId: user.id, tokenHash: hashToken(token), expiresAt: new Date(Date.now() + SESSION_TTL_MS) } });
-        return { user, organization };
+        let organization: { id: string; name: string; slug: string };
+        let role: MembershipRole;
+        if (invitation) {
+          const claimed = await tx.organizationInvitation.updateMany({ where: { id: invitation.id, acceptedAt: null, revokedAt: null, expiresAt: { gt: new Date() } }, data: { acceptedAt: new Date() } });
+          if (claimed.count !== 1) throw new Error('INVITATION_UNAVAILABLE');
+          const membership = await tx.organizationMember.create({ data: { organizationId: invitation.organizationId, userId: user.id, role: invitation.role } });
+          organization = await tx.organization.findUniqueOrThrow({ where: { id: invitation.organizationId }, select: { id: true, name: true, slug: true } });
+          role = membership.role;
+          await tx.auditEvent.create({ data: { organizationId: organization.id, actorUserId: user.id, action: 'organization.invitation_accepted', entityType: 'OrganizationInvitation', entityId: invitation.id, metadata: { role } } });
+        } else {
+          organization = await tx.organization.create({ data: { name: organizationName!, slug } });
+          await tx.organizationMember.create({ data: { organizationId: organization.id, userId: user.id, role: MembershipRole.OWNER } });
+          role = MembershipRole.OWNER;
+          await tx.auditEvent.create({ data: { organizationId: organization.id, actorUserId: user.id, action: 'organization.created', entityType: 'Organization', entityId: organization.id } });
+        }
+        await tx.session.create({ data: { userId: user.id, tokenHash: hashToken(sessionToken), expiresAt: new Date(Date.now() + SESSION_TTL_MS) } });
+        return { user, organization, role };
       });
-      setSessionCookie(response, token);
-      return response.status(201).json({ user: publicUser(result.user), organizations: [{ id: result.organization.id, name: result.organization.name, slug: result.organization.slug, role: MembershipRole.OWNER }] });
+      setSessionCookie(response, sessionToken);
+      return response.status(201).json({ user: publicUser(result.user), organizations: [{ id: result.organization.id, name: result.organization.name, slug: result.organization.slug, role: result.role }] });
     } catch (error) {
+      if (error instanceof Error && error.message === 'INVITATION_UNAVAILABLE') return response.status(409).json({ error: 'This invitation has already been used or is no longer available.' });
       logger.error({ err: error }, 'Signup failed');
       if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'P2002') return response.status(409).json({ error: 'An account or organization with these details already exists' });
       return response.status(500).json({ error: 'Unable to create account' });
@@ -274,12 +295,20 @@ export function createApp() {
     if (!email || ![MembershipRole.MEMBER, MembershipRole.VIEWER].includes(role)) return response.status(400).json({ error: 'Provide a valid email and role MEMBER or VIEWER' });
     try {
       const user = await prisma.user.findUnique({ where: { email }, select: { id: true, email: true, name: true } });
-      if (!user) return response.status(404).json({ error: 'User account not found. Invitations by email are not supported yet.' });
-      const membership = await prisma.organizationMember.create({ data: { organizationId, userId: user.id, role } });
-      await prisma.auditEvent.create({ data: { organizationId, actorUserId: request.auth!.userId, action: 'organization.member_added', entityType: 'OrganizationMember', entityId: membership.id, metadata: { role } } });
-      return response.status(201).json({ member: { id: membership.id, role: membership.role, createdAt: membership.createdAt, user } });
+      if (user) {
+        const membership = await prisma.organizationMember.create({ data: { organizationId, userId: user.id, role } });
+        await prisma.auditEvent.create({ data: { organizationId, actorUserId: request.auth!.userId, action: 'organization.member_added', entityType: 'OrganizationMember', entityId: membership.id, metadata: { role } } });
+        return response.status(201).json({ member: { id: membership.id, role: membership.role, createdAt: membership.createdAt, user } });
+      }
+      const pending = await prisma.organizationInvitation.findFirst({ where: { organizationId, email, acceptedAt: null, revokedAt: null, expiresAt: { gt: new Date() } } });
+      if (pending) return response.status(409).json({ error: 'An active invitation already exists for this email.' });
+      const token = randomBytes(32).toString('base64url');
+      const invitation = await prisma.organizationInvitation.create({ data: { organizationId, inviterUserId: request.auth!.userId, email, role, tokenHash: hashToken(token), expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) } });
+      await prisma.auditEvent.create({ data: { organizationId, actorUserId: request.auth!.userId, action: 'organization.invitation_created', entityType: 'OrganizationInvitation', entityId: invitation.id, metadata: { email, role, expiresAt: invitation.expiresAt.toISOString() } } });
+      const invitationUrl = `${webOrigin}/?invite=${encodeURIComponent(token)}`;
+      return response.status(201).json({ invitation: { id: invitation.id, email: invitation.email, role: invitation.role, expiresAt: invitation.expiresAt, createdAt: invitation.createdAt, invitationUrl } });
     } catch (error) {
-      if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'P2002') return response.status(409).json({ error: 'User is already a member of this organization' });
+      if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'P2002') return response.status(409).json({ error: 'User is already a member of this organization.' });
       logger.error({ err: error }, 'Adding organization member failed');
       return response.status(500).json({ error: 'Unable to add organization member' });
     }
@@ -289,6 +318,47 @@ export function createApp() {
     const organizationId = request.params.organizationId!;
     const members = await prisma.organizationMember.findMany({ where: { organizationId }, include: { user: { select: { id: true, name: true, email: true } } }, orderBy: { createdAt: 'asc' } });
     return response.status(200).json({ members: members.map(({ id, role, createdAt, user }) => ({ id, role, createdAt, user })) });
+  });
+
+  app.get('/api/organizations/:organizationId/invitations', requireAuth, requireOrganizationRole(MembershipRole.OWNER, MembershipRole.ADMIN), async (request, response) => {
+    const invitations = await prisma.organizationInvitation.findMany({
+      where: { organizationId: request.params.organizationId!, acceptedAt: null, revokedAt: null },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true, email: true, role: true, expiresAt: true, createdAt: true },
+    });
+    return response.status(200).json({ invitations });
+  });
+
+  app.delete('/api/organizations/:organizationId/invitations/:invitationId', requireAuth, requireOrganizationRole(MembershipRole.OWNER, MembershipRole.ADMIN), async (request, response) => {
+    const organizationId = request.params.organizationId!;
+    const invitation = await prisma.organizationInvitation.findFirst({ where: { id: request.params.invitationId!, organizationId, acceptedAt: null, revokedAt: null } });
+    if (!invitation) return response.status(404).json({ error: 'Pending invitation not found' });
+    await prisma.organizationInvitation.update({ where: { id: invitation.id }, data: { revokedAt: new Date() } });
+    await prisma.auditEvent.create({ data: { organizationId, actorUserId: request.auth!.userId, action: 'organization.invitation_revoked', entityType: 'OrganizationInvitation', entityId: invitation.id, metadata: { email: invitation.email } } });
+    return response.status(204).end();
+  });
+
+  app.post('/api/auth/accept-invitation', requireAuth, async (request, response) => {
+    const token = request.body?.token;
+    if (typeof token !== 'string' || token.length > 256) return response.status(400).json({ error: 'A valid invitation token is required.' });
+    try {
+      const invitation = await prisma.organizationInvitation.findUnique({ where: { tokenHash: hashToken(token) } });
+      if (!invitation || invitation.email !== request.auth!.email || invitation.expiresAt <= new Date() || invitation.acceptedAt || invitation.revokedAt) {
+        return response.status(400).json({ error: 'This invitation is invalid, expired, already used, or belongs to another email address.' });
+      }
+      await prisma.$transaction(async (tx) => {
+        const claimed = await tx.organizationInvitation.updateMany({ where: { id: invitation.id, acceptedAt: null, revokedAt: null, expiresAt: { gt: new Date() } }, data: { acceptedAt: new Date() } });
+        if (claimed.count !== 1) throw new Error('INVITATION_UNAVAILABLE');
+        await tx.organizationMember.create({ data: { organizationId: invitation.organizationId, userId: request.auth!.userId, role: invitation.role } });
+        await tx.auditEvent.create({ data: { organizationId: invitation.organizationId, actorUserId: request.auth!.userId, action: 'organization.invitation_accepted', entityType: 'OrganizationInvitation', entityId: invitation.id, metadata: { role: invitation.role } } });
+      });
+      return response.status(200).json({ organizations: await getOrganizations(request.auth!.userId) });
+    } catch (error) {
+      if (error instanceof Error && error.message === 'INVITATION_UNAVAILABLE') return response.status(409).json({ error: 'This invitation has already been used or is no longer available.' });
+      if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'P2002') return response.status(409).json({ error: 'You are already a member of this workspace.' });
+      logger.error({ err: error }, 'Accepting invitation failed');
+      return response.status(500).json({ error: 'Unable to accept invitation' });
+    }
   });
 
   app.patch('/api/organizations/:organizationId/members/:memberId/role', requireAuth, requireOrganizationRole(MembershipRole.OWNER), async (request, response) => {

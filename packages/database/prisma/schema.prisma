@@ -32,6 +32,7 @@ model User {
   memberships     OrganizationMember[]
   sessions        Session[]
   auditEvents     AuditEvent[]          @relation("AuditActor")
+  sentInvitations OrganizationInvitation[] @relation("InvitationSender")
 
   @@index([createdAt])
 }
@@ -131,4 +132,24 @@ model Employee {
   @@unique([organizationId, workEmail])
   @@index([organizationId, status, createdAt])
   @@index([organizationId, departmentId])
+}
+
+
+model OrganizationInvitation {
+  id             String         @id @default(cuid())
+  organizationId String
+  inviterUserId  String
+  email          String
+  role           MembershipRole @default(MEMBER)
+  tokenHash      String         @unique
+  expiresAt      DateTime
+  acceptedAt     DateTime?
+  revokedAt      DateTime?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  inviter        User           @relation("InvitationSender", fields: [inviterUserId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, email, createdAt])
+  @@index([expiresAt, acceptedAt, revokedAt])
 }
