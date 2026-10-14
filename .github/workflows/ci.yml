@@ -24,6 +24,9 @@ jobs:
         with:
           node-version: 20
 
+      - name: Configure CI environment
+        run: printf 'DATABASE_URL=postgresql://postgres:postgres@localhost:5432/vertizoom_one?schema=public\n' > .env
+
       - name: Install dependencies
         run: npm install
 
