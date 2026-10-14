@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import HRWorkspace from './HRWorkspace';
 import {
   Activity, ArrowDownRight, ArrowUpRight, Bell, Bot, BriefcaseBusiness,
   CalendarDays, ChartNoAxesCombined, ChevronDown, CircleHelp, Command,
@@ -114,6 +115,7 @@ function App({ user, organization, onLogout }: AppProps) {
         </header>
 
         <div className="page-content">
+          {activeNav === 'HR & People' && organization ? <HRWorkspace organizationId={organization.id} role={organization.role} /> : <>
           <section className="welcome-row">
             <div><div className="eyebrow"><span className="eyebrow-dot" /> YOUR BUSINESS, AT A GLANCE</div><h1>Good morning, {displayName} <span>✦</span></h1><p>Here's what's happening across your workspace today.</p></div>
             <button className="date-pill"><CalendarDays size={16} /> October 14, 2026 <ChevronDown size={15} /></button>
@@ -149,6 +151,7 @@ function App({ user, organization, onLogout }: AppProps) {
             <article className="panel assistant-panel"><div className="assistant-orb"><Bot size={24} /></div><span className="assistant-tag"><span /> VERTIZOOM AI</span><h2>Your business copilot</h2><p>Get help understanding your business, finding insights, and planning your next move.</p><button className="assistant-button" onClick={() => setActiveNav('AI Assistant')}>Explore AI assistant <span>→</span></button><div className="assistant-decoration decoration-one" /><div className="assistant-decoration decoration-two" /></article>
           </section>
 
+          </>}
           <footer className="app-footer"><span>© 2026 Vertizoom One</span><span className="api-indicator"><i className={apiStatus} /> API {apiStatus === 'checking' ? 'checking…' : apiStatus === 'online' ? 'connected' : 'offline'}</span><span>One Platform. Smarter Business.</span></footer>
         </div>
       </main>

@@ -245,7 +245,7 @@ export function createApp() {
       const user = await prisma.user.findUnique({ where: { email }, select: { id: true, email: true, name: true } });
       if (!user) return response.status(404).json({ error: 'User account not found. Invitations by email are not supported yet.' });
       const membership = await prisma.organizationMember.create({ data: { organizationId, userId: user.id, role } });
-      await prisma.auditEvent.create({ data: { organizationId: request.params.organizationId, actorUserId: request.auth!.userId, action: 'organization.member_added', entityType: 'OrganizationMember', entityId: membership.id, metadata: { role } } });
+      await prisma.auditEvent.create({ data: { organizationId, actorUserId: request.auth!.userId, action: 'organization.member_added', entityType: 'OrganizationMember', entityId: membership.id, metadata: { role } } });
       return response.status(201).json({ member: { id: membership.id, role: membership.role, createdAt: membership.createdAt, user } });
     } catch (error) {
       if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'P2002') return response.status(409).json({ error: 'User is already a member of this organization' });
@@ -272,6 +272,102 @@ export function createApp() {
       await prisma.auditEvent.create({ data: { organizationId, actorUserId: request.auth!.userId, action: 'organization.member_role_changed', entityType: 'OrganizationMember', entityId: updated.id, metadata: { role } } });
       return response.status(200).json({ member: { id: updated.id, userId: updated.userId, role: updated.role } });
     } catch (error) { logger.error({ err: error }, 'Role update failed'); return response.status(500).json({ error: 'Unable to update member role' }); }
+  });
+
+
+  // Core ERP: organization-scoped departments and employee directory.
+  app.get('/api/organizations/:organizationId/departments', requireAuth, requireOrganizationRole(), async (request, response) => {
+    const organizationId = request.params.organizationId!;
+    try {
+      const departments = await prisma.department.findMany({
+        where: { organizationId },
+        include: { _count: { select: { employees: true } } },
+        orderBy: { name: 'asc' },
+      });
+      return response.status(200).json({ departments: departments.map(({ id, name, description, createdAt, _count }) => ({ id, name, description, createdAt, employeeCount: _count.employees })) });
+    } catch (error) {
+      logger.error({ err: error }, 'Unable to list departments');
+      return response.status(500).json({ error: 'Unable to load departments' });
+    }
+  });
+
+  app.post('/api/organizations/:organizationId/departments', requireAuth, requireOrganizationRole(MembershipRole.OWNER, MembershipRole.ADMIN), async (request, response) => {
+    const organizationId = request.params.organizationId!;
+    const name = cleanName(request.body?.name, 80);
+    const description = typeof request.body?.description === 'string' ? request.body.description.trim().slice(0, 300) || null : null;
+    if (!name) return response.status(400).json({ error: 'Department name is required (maximum 80 characters)' });
+    try {
+      const department = await prisma.department.create({ data: { organizationId, name, description } });
+      await prisma.auditEvent.create({ data: { organizationId, actorUserId: request.auth!.userId, action: 'department.created', entityType: 'Department', entityId: department.id } });
+      return response.status(201).json({ department: { id: department.id, name: department.name, description: department.description, createdAt: department.createdAt, employeeCount: 0 } });
+    } catch (error) {
+      if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'P2002') return response.status(409).json({ error: 'A department with this name already exists' });
+      logger.error({ err: error }, 'Department creation failed');
+      return response.status(500).json({ error: 'Unable to create department' });
+    }
+  });
+
+  app.get('/api/organizations/:organizationId/employees', requireAuth, requireOrganizationRole(), async (request, response) => {
+    const organizationId = request.params.organizationId!;
+    try {
+      const employees = await prisma.employee.findMany({
+        where: { organizationId },
+        include: { department: { select: { id: true, name: true } } },
+        orderBy: [{ createdAt: 'desc' }],
+      });
+      return response.status(200).json({ employees });
+    } catch (error) {
+      logger.error({ err: error }, 'Unable to list employees');
+      return response.status(500).json({ error: 'Unable to load employees' });
+    }
+  });
+
+  app.post('/api/organizations/:organizationId/employees', requireAuth, requireOrganizationRole(MembershipRole.OWNER, MembershipRole.ADMIN), async (request, response) => {
+    const organizationId = request.params.organizationId!;
+    const employeeCode = cleanName(request.body?.employeeCode, 32);
+    const firstName = cleanName(request.body?.firstName, 80);
+    const lastName = cleanName(request.body?.lastName, 80);
+    const workEmail = request.body?.workEmail == null || request.body.workEmail === '' ? null : normalizeEmail(request.body.workEmail);
+    const jobTitle = request.body?.jobTitle == null || request.body.jobTitle === '' ? null : cleanName(request.body.jobTitle, 100);
+    const departmentId = request.body?.departmentId == null || request.body.departmentId === '' ? null : request.body.departmentId;
+    const startDateValue = request.body?.startDate;
+    const startDate = typeof startDateValue === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(startDateValue) ? new Date(`${startDateValue}T00:00:00.000Z`) : null;
+    if (!employeeCode || !firstName || !lastName || (request.body?.workEmail && !workEmail) || (request.body?.jobTitle && !jobTitle) || (startDateValue && !startDate)) {
+      return response.status(400).json({ error: 'Provide an employee code, first name, last name, and valid optional fields' });
+    }
+    try {
+      if (departmentId) {
+        const department = await prisma.department.findFirst({ where: { id: departmentId, organizationId }, select: { id: true } });
+        if (!department) return response.status(400).json({ error: 'Department does not belong to this organization' });
+      }
+      const employee = await prisma.employee.create({
+        data: { organizationId, employeeCode, firstName, lastName, workEmail, jobTitle, departmentId, startDate },
+        include: { department: { select: { id: true, name: true } } },
+      });
+      await prisma.auditEvent.create({ data: { organizationId, actorUserId: request.auth!.userId, action: 'employee.created', entityType: 'Employee', entityId: employee.id } });
+      return response.status(201).json({ employee });
+    } catch (error) {
+      if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'P2002') return response.status(409).json({ error: 'Employee code or work email already exists in this organization' });
+      logger.error({ err: error }, 'Employee creation failed');
+      return response.status(500).json({ error: 'Unable to create employee' });
+    }
+  });
+
+  app.patch('/api/organizations/:organizationId/employees/:employeeId/status', requireAuth, requireOrganizationRole(MembershipRole.OWNER, MembershipRole.ADMIN), async (request, response) => {
+    const organizationId = request.params.organizationId!;
+    const employeeId = request.params.employeeId!;
+    const status = request.body?.status;
+    if (!['ACTIVE', 'ON_LEAVE', 'INACTIVE'].includes(status)) return response.status(400).json({ error: 'Status must be ACTIVE, ON_LEAVE, or INACTIVE' });
+    try {
+      const employee = await prisma.employee.findFirst({ where: { id: employeeId, organizationId }, select: { id: true } });
+      if (!employee) return response.status(404).json({ error: 'Employee not found' });
+      const updated = await prisma.employee.update({ where: { id: employee.id }, data: { status }, include: { department: { select: { id: true, name: true } } } });
+      await prisma.auditEvent.create({ data: { organizationId, actorUserId: request.auth!.userId, action: 'employee.status_changed', entityType: 'Employee', entityId: updated.id, metadata: { status } } });
+      return response.status(200).json({ employee: updated });
+    } catch (error) {
+      logger.error({ err: error }, 'Employee status update failed');
+      return response.status(500).json({ error: 'Unable to update employee status' });
+    }
   });
 
   app.use((_request, response) => response.status(404).json({ error: 'Not found' }));

@@ -47,3 +47,25 @@ npm run test:auth
 The `.env.test` file is local-only and ignored by Git. The test command refuses to run unless `DATABASE_URL` contains `vertizoom_one_test`. Tests cover signup, password hashing, login/logout, sessions, tenant isolation, membership roles, and origin checks.
 
 Signup creates the first organization and makes the registering user its OWNER. Organization member management currently supports adding an existing account as MEMBER or VIEWER; email invitations and ownership transfer are not implemented yet. Configure HTTPS in production so session cookies use the Secure attribute.
+
+
+## Milestone 3 — Core ERP: departments and employee directory
+
+The HR & People workspace uses the authenticated organization ID for every API request. Employees and departments are organization-scoped; department assignment is validated against the same organization. OWNER and ADMIN can create departments, add employees, and update employee status. Other organization members can view records.
+
+After pulling the milestone changes, regenerate Prisma Client and create/apply a migration against your local development database:
+
+```bash
+npm run db:generate
+npm run db:migrate
+```
+
+Name the migration `core_erp_people` when prompted. Review and commit the generated migration under `packages/database/prisma/migrations` so fresh environments can reproduce the schema. Then run:
+
+```bash
+npm run build
+npm run typecheck
+npm run test:auth
+```
+
+Do not run schema migrations against production until reviewed and backed up.

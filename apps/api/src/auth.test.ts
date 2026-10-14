@@ -99,3 +99,30 @@ test('rejects untrusted origins for mutating requests', async () => {
   const response = await fetch(`${baseUrl}/api/organizations`, { method: 'POST', headers: { Origin: 'https://evil.example', 'Content-Type': 'application/json' }, body: json({ name: 'Untrusted Org' }) });
   assert.equal(response.status, 403);
 });
+
+test('core ERP employee and department access is scoped to the organization', async () => {
+  const ownerA: Client = {};
+  const ownerB: Client = {};
+  await request('/api/auth/login', { method: 'POST', body: json({ email: 'owner@example.com', password: 'correct horse battery staple' }) }, ownerA);
+  await request('/api/auth/login', { method: 'POST', body: json({ email: 'owner-b@example.com', password: 'another correct horse battery staple' }) }, ownerB);
+  const orgA = (await (await request('/api/organizations', {}, ownerA)).json() as { organizations: Array<{ id: string }> }).organizations[0]!;
+  const orgB = (await (await request('/api/organizations', {}, ownerB)).json() as { organizations: Array<{ id: string }> }).organizations[0]!;
+  const departmentAResponse = await request(`/api/organizations/${orgA.id}/departments`, { method: 'POST', body: json({ name: 'Engineering' }) }, ownerA);
+  assert.equal(departmentAResponse.status, 201);
+  const departmentA = ((await departmentAResponse.json()) as { department: { id: string } }).department;
+  const departmentBResponse = await request(`/api/organizations/${orgB.id}/departments`, { method: 'POST', body: json({ name: 'Operations' }) }, ownerB);
+  assert.equal(departmentBResponse.status, 201);
+  const departmentB = ((await departmentBResponse.json()) as { department: { id: string } }).department;
+  const wrongTenantDepartment = await request(`/api/organizations/${orgA.id}/employees`, { method: 'POST', body: json({ employeeCode: 'VZ-001', firstName: 'Test', lastName: 'Person', departmentId: departmentB.id }) }, ownerA);
+  assert.equal(wrongTenantDepartment.status, 400);
+  const employeeResponse = await request(`/api/organizations/${orgA.id}/employees`, { method: 'POST', body: json({ employeeCode: 'VZ-001', firstName: 'Taylor', lastName: 'Jordan', workEmail: 'taylor@example.com', jobTitle: 'Engineer', departmentId: departmentA.id, startDate: '2026-10-01' }) }, ownerA);
+  assert.equal(employeeResponse.status, 201);
+  const employee = ((await employeeResponse.json()) as { employee: { id: string; department: { name: string }; status: string } }).employee;
+  assert.equal(employee.department.name, 'Engineering');
+  assert.equal(employee.status, 'ACTIVE');
+  assert.equal((await request(`/api/organizations/${orgB.id}/employees`, {}, ownerA)).status, 404);
+  assert.equal((await request(`/api/organizations/${orgA.id}/departments`, { method: 'POST', body: json({ name: 'Restricted team' }) }, ownerB)).status, 403);
+  const changed = await request(`/api/organizations/${orgA.id}/employees/${employee.id}/status`, { method: 'PATCH', body: json({ status: 'ON_LEAVE' }) }, ownerA);
+  assert.equal(changed.status, 200);
+  assert.equal(((await changed.json()) as { employee: { status: string } }).employee.status, 'ON_LEAVE');
+});

@@ -7,6 +7,12 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum EmploymentStatus {
+  ACTIVE
+  ON_LEAVE
+  INACTIVE
+}
+
 enum MembershipRole {
   OWNER
   ADMIN
@@ -38,6 +44,8 @@ model Organization {
   updatedAt   DateTime              @updatedAt
   memberships OrganizationMember[]
   auditEvents AuditEvent[]
+  departments Department[]
+  employees Employee[]
 
   @@index([createdAt])
 }
@@ -86,4 +94,41 @@ model AuditEvent {
   @@index([organizationId, createdAt])
   @@index([actorUserId, createdAt])
   @@index([entityType, entityId])
+}
+
+
+model Department {
+  id             String       @id @default(cuid())
+  organizationId String
+  name           String
+  description    String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  employees      Employee[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId, createdAt])
+}
+
+model Employee {
+  id             String           @id @default(cuid())
+  organizationId String
+  departmentId   String?
+  employeeCode   String
+  firstName      String
+  lastName       String
+  workEmail      String?
+  jobTitle       String?
+  status         EmploymentStatus @default(ACTIVE)
+  startDate      DateTime?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  organization   Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  department     Department?      @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+
+  @@unique([organizationId, employeeCode])
+  @@unique([organizationId, workEmail])
+  @@index([organizationId, status, createdAt])
+  @@index([organizationId, departmentId])
 }
