@@ -6,6 +6,20 @@ type Organization = { id: string; name: string; slug: string; role: Role };
 type Member = { id: string; role: Role; createdAt: string; user: { id: string; name: string | null; email: string } };
 type Invitation = { id: string; email: string; role: 'MEMBER' | 'VIEWER'; expiresAt: string; createdAt: string };
 type AuditEvent = { id: string; action: string; entityType: string | null; entityId: string | null; metadata: unknown; createdAt: string; actor: { name: string | null; email: string } | null };
+type CompanyProfile = {
+  legalName: string; logoUrl: string; addressLine1: string; addressLine2: string; city: string;
+  state: string; postalCode: string; country: string; phone: string; businessEmail: string;
+  website: string; gstin: string; pan: string; invoicePrefix: string; nextInvoiceNumber: number;
+  currency: string; defaultTaxRate: number; paymentTerms: string; bankAccountName: string;
+  bankName: string; bankAccountNumber: string; bankIfsc: string; upiId: string;
+};
+const emptyProfile: CompanyProfile = {
+  legalName: '', logoUrl: '', addressLine1: '', addressLine2: '', city: '', state: '', postalCode: '',
+  country: 'India', phone: '', businessEmail: '', website: '', gstin: '', pan: '', invoicePrefix: 'INV',
+  nextInvoiceNumber: 1, currency: 'INR', defaultTaxRate: 0, paymentTerms: 'Payment due within 15 days',
+  bankAccountName: '', bankName: '', bankAccountNumber: '', bankIfsc: '', upiId: '',
+};
+
 type Props = { organization: Organization; onOrganizationUpdated: (organization: Organization) => void };
 
 const roleLabel: Record<Role, string> = { OWNER: 'Owner', ADMIN: 'Admin', MEMBER: 'Member', VIEWER: 'Viewer' };
@@ -28,6 +42,7 @@ export default function WorkspaceSettings({ organization, onOrganizationUpdated 
   const canManageMembers = organization.role === 'OWNER' || organization.role === 'ADMIN';
   const isOwner = organization.role === 'OWNER';
   const [name, setName] = useState(organization.name);
+  const [profile, setProfile] = useState<CompanyProfile>(emptyProfile);
   const [members, setMembers] = useState<Member[]>([]);
   const [events, setEvents] = useState<AuditEvent[]>([]);
   const [invitations, setInvitations] = useState<Invitation[]>([]);
@@ -42,20 +57,27 @@ export default function WorkspaceSettings({ organization, onOrganizationUpdated 
   const load = useCallback(async () => {
     setLoading(true); setError('');
     try {
-      const [memberResponse, eventResponse, invitationResponse] = await Promise.all([
+      const [memberResponse, eventResponse, invitationResponse, profileResponse] = await Promise.all([
         fetch('/api/organizations/' + organization.id + '/members', { credentials: 'include' }),
         fetch('/api/organizations/' + organization.id + '/audit-events', { credentials: 'include' }),
         fetch('/api/organizations/' + organization.id + '/invitations', { credentials: 'include' }),
+        fetch('/api/organizations/' + organization.id + '/profile', { credentials: 'include' }),
       ]);
       const memberBody = await memberResponse.json() as { members?: Member[]; error?: string };
       const eventBody = await eventResponse.json() as { events?: AuditEvent[]; error?: string };
       const invitationBody = await invitationResponse.json() as { invitations?: Invitation[]; error?: string };
+      const profileBody = await profileResponse.json() as { profile?: Partial<CompanyProfile> & { defaultTaxRateBps?: number }; error?: string };
       if (!memberResponse.ok) throw new Error(memberBody.error ?? 'Unable to load members');
       if (!eventResponse.ok) throw new Error(eventBody.error ?? 'Unable to load audit history');
+      if (!profileResponse.ok) throw new Error(profileBody.error ?? 'Unable to load company profile');
       if (!invitationResponse.ok && invitationResponse.status !== 403) throw new Error(invitationBody.error ?? 'Unable to load invitations');
       setMembers(memberBody.members ?? []);
       setEvents(eventBody.events ?? []);
       setInvitations(invitationBody.invitations ?? []);
+      if (profileBody.profile) {
+        const loaded = profileBody.profile;
+        setProfile({ ...emptyProfile, ...loaded, defaultTaxRate: (loaded.defaultTaxRateBps ?? 0) / 100 });
+      }
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Unable to load workspace settings');
     } finally { setLoading(false); }
@@ -80,6 +102,23 @@ export default function WorkspaceSettings({ organization, onOrganizationUpdated 
       setNotice('Workspace settings saved.');
       await load();
     } catch (caught) { setError(caught instanceof Error ? caught.message : 'Unable to save workspace'); }
+    finally { setSaving(false); }
+  }
+
+  async function saveCompanyProfile(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault(); setSaving(true); setError(''); setNotice('');
+    try {
+      const { defaultTaxRate, ...rest } = profile;
+      const response = await fetch('/api/organizations/' + organization.id + '/profile', {
+        method: 'PATCH', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...rest, defaultTaxRate }),
+      });
+      const body = await response.json() as { profile?: Partial<CompanyProfile> & { defaultTaxRateBps?: number }; error?: string };
+      if (!response.ok) throw new Error(body.error ?? 'Unable to save company profile');
+      if (body.profile) setProfile({ ...emptyProfile, ...body.profile, defaultTaxRate: (body.profile.defaultTaxRateBps ?? 0) / 100 });
+      setNotice('Company profile and invoice settings saved.');
+      await load();
+    } catch (caught) { setError(caught instanceof Error ? caught.message : 'Unable to save company profile'); }
     finally { setSaving(false); }
   }
 
@@ -127,6 +166,48 @@ export default function WorkspaceSettings({ organization, onOrganizationUpdated 
         <label>Organization name<input required maxLength={100} value={name} onChange={(event) => setName(event.target.value)} disabled={!isOwner} /></label>
         <label>Workspace slug<input value={organization.slug} readOnly /><small>Used as a stable workspace identifier.</small></label>
         <div className="settings-form-foot"><span>{isOwner ? 'Only the owner can change the organization name.' : 'Only the owner can change organization details.'}</span>{isOwner && <button type="submit" disabled={saving || !name.trim() || name.trim() === organization.name}><Save size={15} />{saving ? 'Saving…' : 'Save changes'}</button>}</div>
+      </form>
+    </section>
+    <section className="settings-card company-profile-card">
+      <div className="settings-card-heading"><span className="settings-icon blue"><Building2 size={19} /></span><div><h2>Company profile & invoicing</h2><p>Business identity, tax details, invoice numbering, and payment instructions.</p></div></div>
+      {!canManageMembers && <p className="settings-helper">Only workspace owners and admins can edit company billing settings.</p>}
+      <form className="settings-profile-form company-settings-form" onSubmit={(event) => void saveCompanyProfile(event)}>
+        <div className="company-settings-section"><h3>Business details</h3><p>These details can be reused on invoices and other customer-facing documents.</p></div>
+        <div className="company-settings-grid">
+          <label>Legal / registered company name<input maxLength={160} value={profile.legalName} onChange={e => setProfile({...profile,legalName:e.target.value})} disabled={!canManageMembers} placeholder="Registered business name" /></label>
+          <label>Logo URL<input type="url" maxLength={2048} value={profile.logoUrl} onChange={e => setProfile({...profile,logoUrl:e.target.value})} disabled={!canManageMembers} placeholder="https://example.com/logo.png" /><small>Use a publicly accessible HTTPS image URL.</small></label>
+          <label>Business email<input type="email" maxLength={254} value={profile.businessEmail} onChange={e => setProfile({...profile,businessEmail:e.target.value})} disabled={!canManageMembers} placeholder="billing@company.com" /></label>
+          <label>Phone<input type="tel" maxLength={30} value={profile.phone} onChange={e => setProfile({...profile,phone:e.target.value})} disabled={!canManageMembers} placeholder="+91 98765 43210" /></label>
+          <label>Website<input type="url" maxLength={255} value={profile.website} onChange={e => setProfile({...profile,website:e.target.value})} disabled={!canManageMembers} placeholder="https://company.com" /></label>
+          <label>GSTIN<input maxLength={15} value={profile.gstin} onChange={e => setProfile({...profile,gstin:e.target.value.toUpperCase()})} disabled={!canManageMembers} placeholder="15-character GSTIN" /></label>
+          <label>PAN<input maxLength={10} value={profile.pan} onChange={e => setProfile({...profile,pan:e.target.value.toUpperCase()})} disabled={!canManageMembers} placeholder="ABCDE1234F" /></label>
+        </div>
+        <div className="company-settings-section"><h3>Registered address</h3></div>
+        <div className="company-settings-grid">
+          <label className="company-settings-wide">Address line 1<input maxLength={160} value={profile.addressLine1} onChange={e => setProfile({...profile,addressLine1:e.target.value})} disabled={!canManageMembers} /></label>
+          <label className="company-settings-wide">Address line 2<input maxLength={160} value={profile.addressLine2} onChange={e => setProfile({...profile,addressLine2:e.target.value})} disabled={!canManageMembers} /></label>
+          <label>City<input maxLength={100} value={profile.city} onChange={e => setProfile({...profile,city:e.target.value})} disabled={!canManageMembers} /></label>
+          <label>State / Province<input maxLength={100} value={profile.state} onChange={e => setProfile({...profile,state:e.target.value})} disabled={!canManageMembers} /></label>
+          <label>Postal code<input maxLength={20} value={profile.postalCode} onChange={e => setProfile({...profile,postalCode:e.target.value})} disabled={!canManageMembers} /></label>
+          <label>Country<input maxLength={100} value={profile.country} onChange={e => setProfile({...profile,country:e.target.value})} disabled={!canManageMembers} /></label>
+        </div>
+        <div className="company-settings-section"><h3>Invoice defaults</h3><p>Use these values as defaults when creating new invoices. Existing invoices will not be changed.</p></div>
+        <div className="company-settings-grid">
+          <label>Invoice prefix<input required maxLength={12} value={profile.invoicePrefix} onChange={e => setProfile({...profile,invoicePrefix:e.target.value.toUpperCase()})} disabled={!canManageMembers} placeholder="INV" /></label>
+          <label>Next invoice number<input required type="number" min="1" step="1" value={profile.nextInvoiceNumber} onChange={e => setProfile({...profile,nextInvoiceNumber:Number(e.target.value)})} disabled={!canManageMembers} /></label>
+          <label>Currency<select value={profile.currency} onChange={e => setProfile({...profile,currency:e.target.value})} disabled={!canManageMembers}><option value="INR">INR — Indian Rupee (₹)</option><option value="USD">USD — US Dollar ($)</option><option value="GBP">GBP — British Pound (£)</option><option value="EUR">EUR — Euro (€)</option><option value="CAD">CAD — Canadian Dollar</option><option value="AUD">AUD — Australian Dollar</option><option value="AED">AED — UAE Dirham</option></select></label>
+          <label>Default tax rate (%)<input type="number" min="0" max="100" step="0.01" value={profile.defaultTaxRate} onChange={e => setProfile({...profile,defaultTaxRate:Number(e.target.value)})} disabled={!canManageMembers} /></label>
+          <label className="company-settings-wide">Payment terms<textarea rows={2} maxLength={500} value={profile.paymentTerms} onChange={e => setProfile({...profile,paymentTerms:e.target.value})} disabled={!canManageMembers} placeholder="e.g. Payment due within 15 days" /></label>
+        </div>
+        <div className="company-settings-section"><h3>Payment details</h3><p>These details can be displayed on invoices to help customers pay you.</p></div>
+        <div className="company-settings-grid">
+          <label>Account holder name<input maxLength={120} value={profile.bankAccountName} onChange={e => setProfile({...profile,bankAccountName:e.target.value})} disabled={!canManageMembers} /></label>
+          <label>Bank name<input maxLength={120} value={profile.bankName} onChange={e => setProfile({...profile,bankName:e.target.value})} disabled={!canManageMembers} /></label>
+          <label>Account number<input maxLength={34} value={profile.bankAccountNumber} onChange={e => setProfile({...profile,bankAccountNumber:e.target.value})} disabled={!canManageMembers} /></label>
+          <label>IFSC<input maxLength={11} value={profile.bankIfsc} onChange={e => setProfile({...profile,bankIfsc:e.target.value.toUpperCase()})} disabled={!canManageMembers} placeholder="e.g. HDFC0001234" /></label>
+          <label>UPI ID<input maxLength={100} value={profile.upiId} onChange={e => setProfile({...profile,upiId:e.target.value})} disabled={!canManageMembers} placeholder="company@bank" /></label>
+        </div>
+        {canManageMembers && <div className="settings-form-foot company-settings-actions"><span>Saved securely for this workspace. Invoice generation will use these defaults in a follow-up step.</span><button type="submit" disabled={saving}>{saving ? <><LoaderCircle size={15} /> Saving…</> : <><Save size={15} /> Save company settings</>}</button></div>}
       </form>
     </section>
     <section className="settings-card">
