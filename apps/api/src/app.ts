@@ -521,6 +521,108 @@ export function createApp() {
     }
   });
 
+
+  // CRM: every record and relationship is scoped to the authorized organization.
+  const crmWriters = [MembershipRole.OWNER, MembershipRole.ADMIN, MembershipRole.MEMBER];
+  app.get('/api/organizations/:organizationId/crm/customers', requireAuth, requireOrganizationRole(), async (req, res) => {
+    const organizationId=req.params.organizationId!;
+    const search=typeof req.query.search==='string'?req.query.search.trim().slice(0,100):'';
+    try {
+      const records=await prisma.crmCustomer.findMany({where:{organizationId,...(search?{OR:[{name:{contains:search,mode:'insensitive'}},{email:{contains:search,mode:'insensitive'}},{industry:{contains:search,mode:'insensitive'}}]}:{})},include:{_count:{select:{contacts:true,leads:true}}},orderBy:{updatedAt:'desc'},take:200});
+      return res.json({customers:records.map(({_count,...c})=>({...c,contactCount:_count.contacts,leadCount:_count.leads}))});
+    } catch(error){logger.error({err:error},'CRM customers failed');return res.status(500).json({error:'Unable to load customers'});}
+  });
+  app.post('/api/organizations/:organizationId/crm/customers', requireAuth, requireOrganizationRole(...crmWriters), async (req,res)=>{
+    const organizationId=req.params.organizationId!, name=cleanName(req.body?.name,120);
+    const email=req.body?.email==null||req.body.email===''?null:normalizeEmail(req.body.email);
+    const phone=req.body?.phone==null||req.body.phone===''?null:cleanName(req.body.phone,40);
+    const website=req.body?.website==null||req.body.website===''?null:cleanName(req.body.website,200);
+    const industry=req.body?.industry==null||req.body.industry===''?null:cleanName(req.body.industry,100);
+    const notes=typeof req.body?.notes==='string'?req.body.notes.trim().slice(0,2000)||null:null;
+    const status=req.body?.status??'PROSPECT';
+    if(!name||(req.body?.email&&!email)||(req.body?.phone&&!phone)||(req.body?.website&&!website)||(req.body?.industry&&!industry)||!['PROSPECT','ACTIVE','INACTIVE'].includes(status))return res.status(400).json({error:'Provide a customer name and valid optional fields/status'});
+    if(website&&!/^https?:\/\//i.test(website))return res.status(400).json({error:'Website must start with http:// or https://'});
+    try{const customer=await prisma.crmCustomer.create({data:{organizationId,name,email,phone,website,industry,notes,status}});
+      await prisma.auditEvent.create({data:{organizationId,actorUserId:req.auth!.userId,action:'crm.customer_created',entityType:'CrmCustomer',entityId:customer.id}});
+      return res.status(201).json({customer:{...customer,contactCount:0,leadCount:0}});
+    }catch(error){logger.error({err:error},'CRM customer create failed');return res.status(500).json({error:'Unable to create customer'});}
+  });
+  app.patch('/api/organizations/:organizationId/crm/customers/:customerId', requireAuth, requireOrganizationRole(...crmWriters), async (req,res)=>{
+    const organizationId=req.params.organizationId!,customerId=req.params.customerId!,name=cleanName(req.body?.name,120);
+    const email=req.body?.email==null||req.body.email===''?null:normalizeEmail(req.body.email),phone=req.body?.phone==null||req.body.phone===''?null:cleanName(req.body.phone,40);
+    const website=req.body?.website==null||req.body.website===''?null:cleanName(req.body.website,200),industry=req.body?.industry==null||req.body.industry===''?null:cleanName(req.body.industry,100);
+    const notes=typeof req.body?.notes==='string'?req.body.notes.trim().slice(0,2000)||null:null,status=req.body?.status;
+    if(!name||(req.body?.email&&!email)||(req.body?.phone&&!phone)||(req.body?.website&&!website)||(req.body?.industry&&!industry)||!['PROSPECT','ACTIVE','INACTIVE'].includes(status))return res.status(400).json({error:'Provide a customer name and valid optional fields/status'});
+    if(website&&!/^https?:\/\//i.test(website))return res.status(400).json({error:'Website must start with http:// or https://'});
+    try{if(!await prisma.crmCustomer.findFirst({where:{id:customerId,organizationId},select:{id:true}}))return res.status(404).json({error:'Customer not found'});
+      const c=await prisma.crmCustomer.update({where:{id:customerId},data:{name,email,phone,website,industry,notes,status},include:{_count:{select:{contacts:true,leads:true}}}});
+      await prisma.auditEvent.create({data:{organizationId,actorUserId:req.auth!.userId,action:'crm.customer_updated',entityType:'CrmCustomer',entityId:c.id}});
+      const {_count,...customer}=c;return res.json({customer:{...customer,contactCount:_count.contacts,leadCount:_count.leads}});
+    }catch(error){logger.error({err:error},'CRM customer update failed');return res.status(500).json({error:'Unable to update customer'});}
+  });
+  app.get('/api/organizations/:organizationId/crm/contacts',requireAuth,requireOrganizationRole(),async(req,res)=>{
+    try{return res.json({contacts:await prisma.crmContact.findMany({where:{organizationId:req.params.organizationId!},include:{customer:{select:{id:true,name:true}}},orderBy:[{lastName:'asc'},{firstName:'asc'}],take:300})});}
+    catch(error){logger.error({err:error},'CRM contacts failed');return res.status(500).json({error:'Unable to load contacts'});}
+  });
+  app.post('/api/organizations/:organizationId/crm/contacts',requireAuth,requireOrganizationRole(...crmWriters),async(req,res)=>{
+    const organizationId=req.params.organizationId!,customerId=typeof req.body?.customerId==='string'?req.body.customerId:'';
+    const firstName=cleanName(req.body?.firstName,80),lastName=cleanName(req.body?.lastName,80);
+    const email=req.body?.email==null||req.body.email===''?null:normalizeEmail(req.body.email),phone=req.body?.phone==null||req.body.phone===''?null:cleanName(req.body.phone,40);
+    const jobTitle=req.body?.jobTitle==null||req.body.jobTitle===''?null:cleanName(req.body.jobTitle,100),notes=typeof req.body?.notes==='string'?req.body.notes.trim().slice(0,1500)||null:null;
+    if(!customerId||!firstName||!lastName||(req.body?.email&&!email)||(req.body?.phone&&!phone)||(req.body?.jobTitle&&!jobTitle))return res.status(400).json({error:'Provide a customer, first name, last name, and valid optional fields'});
+    try{if(!await prisma.crmCustomer.findFirst({where:{id:customerId,organizationId},select:{id:true}}))return res.status(400).json({error:'Customer does not belong to this organization'});
+      const contact=await prisma.crmContact.create({data:{organizationId,customerId,firstName,lastName,email,phone,jobTitle,notes},include:{customer:{select:{id:true,name:true}}}});
+      await prisma.auditEvent.create({data:{organizationId,actorUserId:req.auth!.userId,action:'crm.contact_created',entityType:'CrmContact',entityId:contact.id}});return res.status(201).json({contact});
+    }catch(error){logger.error({err:error},'CRM contact create failed');return res.status(500).json({error:'Unable to create contact'});}
+  });
+  app.patch('/api/organizations/:organizationId/crm/contacts/:contactId',requireAuth,requireOrganizationRole(...crmWriters),async(req,res)=>{
+    const organizationId=req.params.organizationId!,contactId=req.params.contactId!,customerId=typeof req.body?.customerId==='string'?req.body.customerId:'';
+    const firstName=cleanName(req.body?.firstName,80),lastName=cleanName(req.body?.lastName,80);
+    const email=req.body?.email==null||req.body.email===''?null:normalizeEmail(req.body.email),phone=req.body?.phone==null||req.body.phone===''?null:cleanName(req.body.phone,40);
+    const jobTitle=req.body?.jobTitle==null||req.body.jobTitle===''?null:cleanName(req.body.jobTitle,100),notes=typeof req.body?.notes==='string'?req.body.notes.trim().slice(0,1500)||null:null;
+    if(!customerId||!firstName||!lastName||(req.body?.email&&!email)||(req.body?.phone&&!phone)||(req.body?.jobTitle&&!jobTitle))return res.status(400).json({error:'Provide a customer, first name, last name, and valid optional fields'});
+    try{
+      const [existing,customer]=await Promise.all([prisma.crmContact.findFirst({where:{id:contactId,organizationId},select:{id:true}}),prisma.crmCustomer.findFirst({where:{id:customerId,organizationId},select:{id:true}})]);
+      if(!existing)return res.status(404).json({error:'Contact not found'});if(!customer)return res.status(400).json({error:'Customer does not belong to this organization'});
+      const contact=await prisma.crmContact.update({where:{id:contactId},data:{customerId,firstName,lastName,email,phone,jobTitle,notes},include:{customer:{select:{id:true,name:true}}}});
+      await prisma.auditEvent.create({data:{organizationId,actorUserId:req.auth!.userId,action:'crm.contact_updated',entityType:'CrmContact',entityId:contact.id}});return res.json({contact});
+    }catch(error){logger.error({err:error},'CRM contact update failed');return res.status(500).json({error:'Unable to update contact'});}
+  });
+  app.get('/api/organizations/:organizationId/crm/leads',requireAuth,requireOrganizationRole(),async(req,res)=>{
+    try{return res.json({leads:await prisma.crmLead.findMany({where:{organizationId:req.params.organizationId!},include:{customer:{select:{id:true,name:true}},contact:{select:{id:true,firstName:true,lastName:true,email:true}}},orderBy:{updatedAt:'desc'},take:300})});}
+    catch(error){logger.error({err:error},'CRM leads failed');return res.status(500).json({error:'Unable to load sales pipeline'});}
+  });
+  app.post('/api/organizations/:organizationId/crm/leads',requireAuth,requireOrganizationRole(...crmWriters),async(req,res)=>{
+    const organizationId=req.params.organizationId!,title=cleanName(req.body?.title,140);
+    const customerId=typeof req.body?.customerId==='string'&&req.body.customerId?req.body.customerId:null,contactId=typeof req.body?.contactId==='string'&&req.body.contactId?req.body.contactId:null;
+    const value=req.body?.estimatedValue==null||req.body.estimatedValue===''?0:Number(req.body.estimatedValue),stage=req.body?.stage??'NEW';
+    const source=req.body?.source==null||req.body.source===''?null:cleanName(req.body.source,80),notes=typeof req.body?.notes==='string'?req.body.notes.trim().slice(0,2000)||null:null;
+    const close=req.body?.expectedCloseDate?typeof req.body.expectedCloseDate==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(req.body.expectedCloseDate)?new Date(req.body.expectedCloseDate+'T00:00:00.000Z'):undefined:null;
+    if(!title||!Number.isFinite(value)||value<0||value>1000000000||!['NEW','QUALIFIED','PROPOSAL','NEGOTIATION','WON','LOST'].includes(stage)||(req.body?.source&&!source)||close===undefined)return res.status(400).json({error:'Provide a lead title and valid value, stage, source, and close date'});
+    try{
+      if(customerId&&!await prisma.crmCustomer.findFirst({where:{id:customerId,organizationId},select:{id:true}}))return res.status(400).json({error:'Customer does not belong to this organization'});
+      if(contactId&&!await prisma.crmContact.findFirst({where:{id:contactId,organizationId,...(customerId?{customerId}:{})},select:{id:true}}))return res.status(400).json({error:'Contact does not belong to this organization or selected customer'});
+      const lead=await prisma.crmLead.create({data:{organizationId,title,customerId,contactId,estimatedValueCents:Math.round(value*100),stage,source,notes,expectedCloseDate:close},include:{customer:{select:{id:true,name:true}},contact:{select:{id:true,firstName:true,lastName:true,email:true}}}});
+      await prisma.auditEvent.create({data:{organizationId,actorUserId:req.auth!.userId,action:'crm.lead_created',entityType:'CrmLead',entityId:lead.id}});return res.status(201).json({lead});
+    }catch(error){logger.error({err:error},'CRM lead create failed');return res.status(500).json({error:'Unable to create lead'});}
+  });
+  app.patch('/api/organizations/:organizationId/crm/leads/:leadId',requireAuth,requireOrganizationRole(...crmWriters),async(req,res)=>{
+    const organizationId=req.params.organizationId!,leadId=req.params.leadId!,title=cleanName(req.body?.title,140);
+    const customerId=typeof req.body?.customerId==='string'&&req.body.customerId?req.body.customerId:null,contactId=typeof req.body?.contactId==='string'&&req.body.contactId?req.body.contactId:null;
+    const value=req.body?.estimatedValue==null||req.body.estimatedValue===''?0:Number(req.body.estimatedValue),stage=req.body?.stage;
+    const source=req.body?.source==null||req.body.source===''?null:cleanName(req.body.source,80),notes=typeof req.body?.notes==='string'?req.body.notes.trim().slice(0,2000)||null:null;
+    const close=req.body?.expectedCloseDate?typeof req.body.expectedCloseDate==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(req.body.expectedCloseDate)?new Date(req.body.expectedCloseDate+'T00:00:00.000Z'):undefined:null;
+    if(!title||!Number.isFinite(value)||value<0||value>1000000000||!['NEW','QUALIFIED','PROPOSAL','NEGOTIATION','WON','LOST'].includes(stage)||(req.body?.source&&!source)||close===undefined)return res.status(400).json({error:'Provide a lead title and valid value, stage, source, and close date'});
+    try{
+      if(!await prisma.crmLead.findFirst({where:{id:leadId,organizationId},select:{id:true}}))return res.status(404).json({error:'Lead not found'});
+      if(customerId&&!await prisma.crmCustomer.findFirst({where:{id:customerId,organizationId},select:{id:true}}))return res.status(400).json({error:'Customer does not belong to this organization'});
+      if(contactId&&!await prisma.crmContact.findFirst({where:{id:contactId,organizationId,...(customerId?{customerId}:{})},select:{id:true}}))return res.status(400).json({error:'Contact does not belong to this organization or selected customer'});
+      const lead=await prisma.crmLead.update({where:{id:leadId},data:{title,customerId,contactId,estimatedValueCents:Math.round(value*100),stage,source,notes,expectedCloseDate:close},include:{customer:{select:{id:true,name:true}},contact:{select:{id:true,firstName:true,lastName:true,email:true}}}});
+      await prisma.auditEvent.create({data:{organizationId,actorUserId:req.auth!.userId,action:'crm.lead_updated',entityType:'CrmLead',entityId:lead.id,metadata:{stage}}});return res.json({lead});
+    }catch(error){logger.error({err:error},'CRM lead update failed');return res.status(500).json({error:'Unable to update lead'});}
+  });
+
+
   app.use((_request, response) => response.status(404).json({ error: 'Not found' }));
   return app;
 }

@@ -13,6 +13,10 @@ enum EmploymentStatus {
   INACTIVE
 }
 
+enum CrmCustomerStatus { PROSPECT ACTIVE INACTIVE }
+
+enum CrmLeadStage { NEW QUALIFIED PROPOSAL NEGOTIATION WON LOST }
+
 enum MembershipRole {
   OWNER
   ADMIN
@@ -48,6 +52,9 @@ model Organization {
   departments Department[]
   employees Employee[]
   invitations OrganizationInvitation[]
+  crmCustomers CrmCustomer[]
+  crmContacts CrmContact[]
+  crmLeads CrmLead[]
 
   @@index([createdAt])
 }
@@ -153,4 +160,63 @@ model OrganizationInvitation {
 
   @@index([organizationId, email, createdAt])
   @@index([expiresAt, acceptedAt, revokedAt])
+}
+
+
+model CrmCustomer {
+  id String @id @default(cuid())
+  organizationId String
+  name String
+  industry String?
+  website String?
+  email String?
+  phone String?
+  status CrmCustomerStatus @default(PROSPECT)
+  notes String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  contacts CrmContact[]
+  leads CrmLead[]
+  @@index([organizationId, status, updatedAt])
+  @@index([organizationId, name])
+}
+
+model CrmContact {
+  id String @id @default(cuid())
+  organizationId String
+  customerId String
+  firstName String
+  lastName String
+  email String?
+  phone String?
+  jobTitle String?
+  notes String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  customer CrmCustomer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  leads CrmLead[]
+  @@index([organizationId, customerId])
+  @@index([organizationId, lastName, firstName])
+}
+
+model CrmLead {
+  id String @id @default(cuid())
+  organizationId String
+  customerId String?
+  contactId String?
+  title String
+  estimatedValueCents Int @default(0)
+  stage CrmLeadStage @default(NEW)
+  source String?
+  expectedCloseDate DateTime?
+  notes String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  customer CrmCustomer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  contact CrmContact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  @@index([organizationId, stage, updatedAt])
+  @@index([organizationId, customerId])
 }

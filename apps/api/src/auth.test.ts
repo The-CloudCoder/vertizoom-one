@@ -160,3 +160,23 @@ test('workspace invitations can be created and accepted by a new account', async
   });
   assert.equal(duplicateAcceptance.status, 400);
 });
+
+
+test('CRM customer, contact, and lead records are organization-scoped', async () => {
+  const ownerA: Client = {}, ownerB: Client = {};
+  await request('/api/auth/login', { method: 'POST', body: json({ email: 'owner@example.com', password: 'correct horse battery staple' }) }, ownerA);
+  await request('/api/auth/login', { method: 'POST', body: json({ email: 'owner-b@example.com', password: 'another correct horse battery staple' }) }, ownerB);
+  const orgA=(await (await request('/api/organizations',{},ownerA)).json() as {organizations:Array<{id:string}>}).organizations[0]!;
+  const orgB=(await (await request('/api/organizations',{},ownerB)).json() as {organizations:Array<{id:string}>}).organizations[0]!;
+  const cRes=await request(`/api/organizations/${orgA.id}/crm/customers`,{method:'POST',body:json({name:'Northwind CRM Test',email:'sales@northwind.test',status:'PROSPECT'})},ownerA);
+  assert.equal(cRes.status,201);
+  const customer=((await cRes.json()) as {customer:{id:string;status:string}}).customer;assert.equal(customer.status,'PROSPECT');
+  const pRes=await request(`/api/organizations/${orgA.id}/crm/contacts`,{method:'POST',body:json({customerId:customer.id,firstName:'Casey',lastName:'Contact',email:'casey@northwind.test'})},ownerA);
+  assert.equal(pRes.status,201);const contact=((await pRes.json()) as {contact:{id:string;customer:{id:string}}}).contact;assert.equal(contact.customer.id,customer.id);
+  const lRes=await request(`/api/organizations/${orgA.id}/crm/leads`,{method:'POST',body:json({title:'Northwind renewal',customerId:customer.id,contactId:contact.id,estimatedValue:12500,stage:'QUALIFIED'})},ownerA);
+  assert.equal(lRes.status,201);const lead=((await lRes.json()) as {lead:{id:string;estimatedValueCents:number;stage:string}}).lead;assert.equal(lead.estimatedValueCents,1250000);assert.equal(lead.stage,'QUALIFIED');
+  assert.equal((await request(`/api/organizations/${orgB.id}/crm/customers`,{},ownerA)).status,404);
+  const otherRes=await request(`/api/organizations/${orgB.id}/crm/customers`,{method:'POST',body:json({name:'Other Org CRM Customer'})},ownerB);assert.equal(otherRes.status,201);
+  const foreignCustomer=((await otherRes.json()) as {customer:{id:string}}).customer;
+  const cross=await request(`/api/organizations/${orgA.id}/crm/leads`,{method:'POST',body:json({title:'Foreign lead',customerId:foreignCustomer.id})},ownerA);assert.equal(cross.status,400);
+});
