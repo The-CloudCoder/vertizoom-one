@@ -307,6 +307,26 @@ export function createApp() {
     }
   });
 
+
+  app.patch('/api/organizations/:organizationId/departments/:departmentId', requireAuth, requireOrganizationRole(MembershipRole.OWNER, MembershipRole.ADMIN), async (request, response) => {
+    const organizationId = request.params.organizationId!;
+    const departmentId = request.params.departmentId!;
+    const name = cleanName(request.body?.name, 80);
+    const description = typeof request.body?.description === 'string' ? request.body.description.trim().slice(0, 300) || null : null;
+    if (!name) return response.status(400).json({ error: 'Department name is required (maximum 80 characters)' });
+    try {
+      const existing = await prisma.department.findFirst({ where: { id: departmentId, organizationId }, select: { id: true } });
+      if (!existing) return response.status(404).json({ error: 'Department not found' });
+      const department = await prisma.department.update({ where: { id: existing.id }, data: { name, description }, include: { _count: { select: { employees: true } } } });
+      await prisma.auditEvent.create({ data: { organizationId, actorUserId: request.auth!.userId, action: 'department.updated', entityType: 'Department', entityId: department.id } });
+      return response.status(200).json({ department: { id: department.id, name: department.name, description: department.description, createdAt: department.createdAt, employeeCount: department._count.employees } });
+    } catch (error) {
+      if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'P2002') return response.status(409).json({ error: 'A department with this name already exists' });
+      logger.error({ err: error }, 'Department update failed');
+      return response.status(500).json({ error: 'Unable to update department' });
+    }
+  });
+
   app.get('/api/organizations/:organizationId/employees', requireAuth, requireOrganizationRole(), async (request, response) => {
     const organizationId = request.params.organizationId!;
     try {
@@ -350,6 +370,36 @@ export function createApp() {
       if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'P2002') return response.status(409).json({ error: 'Employee code or work email already exists in this organization' });
       logger.error({ err: error }, 'Employee creation failed');
       return response.status(500).json({ error: 'Unable to create employee' });
+    }
+  });
+
+
+  app.patch('/api/organizations/:organizationId/employees/:employeeId', requireAuth, requireOrganizationRole(MembershipRole.OWNER, MembershipRole.ADMIN), async (request, response) => {
+    const organizationId = request.params.organizationId!;
+    const employeeId = request.params.employeeId!;
+    const employeeCode = cleanName(request.body?.employeeCode, 32);
+    const firstName = cleanName(request.body?.firstName, 80);
+    const lastName = cleanName(request.body?.lastName, 80);
+    const workEmail = request.body?.workEmail == null || request.body.workEmail === '' ? null : normalizeEmail(request.body.workEmail);
+    const jobTitle = request.body?.jobTitle == null || request.body?.jobTitle === '' ? null : cleanName(request.body.jobTitle, 100);
+    const departmentId = request.body?.departmentId == null || request.body?.departmentId === '' ? null : request.body.departmentId;
+    const startDateValue = request.body?.startDate;
+    const startDate = startDateValue == null || startDateValue === '' ? null : typeof startDateValue === 'string' && /^\\d{4}-\\d{2}-\\d{2}$/.test(startDateValue) ? new Date(startDateValue + 'T00:00:00.000Z') : undefined;
+    if (!employeeCode || !firstName || !lastName || (request.body?.workEmail && !workEmail) || (request.body?.jobTitle && !jobTitle) || startDate === undefined) return response.status(400).json({ error: 'Provide an employee code, first name, last name, and valid optional fields' });
+    try {
+      const existing = await prisma.employee.findFirst({ where: { id: employeeId, organizationId }, select: { id: true } });
+      if (!existing) return response.status(404).json({ error: 'Employee not found' });
+      if (departmentId) {
+        const department = await prisma.department.findFirst({ where: { id: departmentId, organizationId }, select: { id: true } });
+        if (!department) return response.status(400).json({ error: 'Department does not belong to this organization' });
+      }
+      const employee = await prisma.employee.update({ where: { id: existing.id }, data: { employeeCode, firstName, lastName, workEmail, jobTitle, departmentId, startDate }, include: { department: { select: { id: true, name: true } } } });
+      await prisma.auditEvent.create({ data: { organizationId, actorUserId: request.auth!.userId, action: 'employee.updated', entityType: 'Employee', entityId: employee.id } });
+      return response.status(200).json({ employee });
+    } catch (error) {
+      if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'P2002') return response.status(409).json({ error: 'Employee code or work email already exists in this organization' });
+      logger.error({ err: error }, 'Employee update failed');
+      return response.status(500).json({ error: 'Unable to update employee' });
     }
   });
 
