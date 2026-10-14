@@ -237,13 +237,14 @@ export function createApp() {
   });
 
   app.post('/api/organizations/:organizationId/members', requireAuth, requireOrganizationRole(MembershipRole.OWNER, MembershipRole.ADMIN), async (request, response) => {
+    const organizationId = request.params.organizationId!;
     const email = normalizeEmail(request.body?.email);
     const role = request.body?.role;
     if (!email || ![MembershipRole.MEMBER, MembershipRole.VIEWER].includes(role)) return response.status(400).json({ error: 'Provide a valid email and role MEMBER or VIEWER' });
     try {
       const user = await prisma.user.findUnique({ where: { email }, select: { id: true, email: true, name: true } });
       if (!user) return response.status(404).json({ error: 'User account not found. Invitations by email are not supported yet.' });
-      const membership = await prisma.organizationMember.create({ data: { organizationId: request.params.organizationId, userId: user.id, role } });
+      const membership = await prisma.organizationMember.create({ data: { organizationId, userId: user.id, role } });
       await prisma.auditEvent.create({ data: { organizationId: request.params.organizationId, actorUserId: request.auth!.userId, action: 'organization.member_added', entityType: 'OrganizationMember', entityId: membership.id, metadata: { role } } });
       return response.status(201).json({ member: { id: membership.id, role: membership.role, createdAt: membership.createdAt, user } });
     } catch (error) {
@@ -254,18 +255,21 @@ export function createApp() {
   });
 
   app.get('/api/organizations/:organizationId/members', requireAuth, requireOrganizationRole(), async (request, response) => {
-    const members = await prisma.organizationMember.findMany({ where: { organizationId: request.params.organizationId }, include: { user: { select: { id: true, name: true, email: true } } }, orderBy: { createdAt: 'asc' } });
+    const organizationId = request.params.organizationId!;
+    const members = await prisma.organizationMember.findMany({ where: { organizationId }, include: { user: { select: { id: true, name: true, email: true } } }, orderBy: { createdAt: 'asc' } });
     return response.status(200).json({ members: members.map(({ id, role, createdAt, user }) => ({ id, role, createdAt, user })) });
   });
 
   app.patch('/api/organizations/:organizationId/members/:memberId/role', requireAuth, requireOrganizationRole(MembershipRole.OWNER), async (request, response) => {
+    const organizationId = request.params.organizationId!;
+    const memberId = request.params.memberId!;
     const role = request.body?.role;
     if (![MembershipRole.ADMIN, MembershipRole.MEMBER, MembershipRole.VIEWER].includes(role)) return response.status(400).json({ error: 'Role must be ADMIN, MEMBER, or VIEWER. Ownership transfer is not supported yet.' });
     try {
-      const target = await prisma.organizationMember.findFirst({ where: { id: request.params.memberId, organizationId: request.params.organizationId } });
+      const target = await prisma.organizationMember.findFirst({ where: { id: memberId, organizationId } });
       if (!target || target.role === MembershipRole.OWNER) return response.status(404).json({ error: 'Organization member not found' });
       const updated = await prisma.organizationMember.update({ where: { id: target.id }, data: { role } });
-      await prisma.auditEvent.create({ data: { organizationId: request.params.organizationId, actorUserId: request.auth!.userId, action: 'organization.member_role_changed', entityType: 'OrganizationMember', entityId: updated.id, metadata: { role } } });
+      await prisma.auditEvent.create({ data: { organizationId, actorUserId: request.auth!.userId, action: 'organization.member_role_changed', entityType: 'OrganizationMember', entityId: updated.id, metadata: { role } } });
       return response.status(200).json({ member: { id: updated.id, userId: updated.userId, role: updated.role } });
     } catch (error) { logger.error({ err: error }, 'Role update failed'); return response.status(500).json({ error: 'Unable to update member role' }); }
   });

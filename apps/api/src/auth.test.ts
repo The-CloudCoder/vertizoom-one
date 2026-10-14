@@ -28,8 +28,9 @@ before(async () => {
   await prisma.organizationMember.deleteMany();
   await prisma.organization.deleteMany();
   await prisma.user.deleteMany();
-  server = app.listen(0);
-  const address = server.address();
+  const testServer = app.listen(0);
+  server = testServer;
+  const address = testServer.address();
   if (!address || typeof address === 'string') throw new Error('Unable to start test server');
   baseUrl = `http://127.0.0.1:${address.port}`;
 });
