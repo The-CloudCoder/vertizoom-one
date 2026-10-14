@@ -28,6 +28,20 @@ enum CrmLeadStage {
   LOST
 }
 
+enum ErpInvoiceStatus {
+  DRAFT
+  SENT
+  PAID
+  OVERDUE
+  CANCELLED
+}
+
+enum ErpExpenseStatus {
+  PENDING
+  APPROVED
+  PAID
+}
+
 enum MembershipRole {
   OWNER
   ADMIN
@@ -66,6 +80,8 @@ model Organization {
   crmCustomers CrmCustomer[]
   crmContacts CrmContact[]
   crmLeads CrmLead[]
+  erpInvoices ErpInvoice[]
+  erpExpenses ErpExpense[]
 
   @@index([createdAt])
 }
@@ -230,4 +246,42 @@ model CrmLead {
   contact CrmContact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
   @@index([organizationId, stage, updatedAt])
   @@index([organizationId, customerId])
+}
+
+
+model ErpInvoice {
+  id             String           @id @default(cuid())
+  organizationId String
+  invoiceNumber  String
+  customerName   String
+  issueDate      DateTime         @default(now())
+  dueDate        DateTime?
+  amountCents    Int
+  status         ErpInvoiceStatus @default(DRAFT)
+  notes          String?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  organization   Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, invoiceNumber])
+  @@index([organizationId, status, updatedAt])
+  @@index([organizationId, dueDate])
+}
+
+model ErpExpense {
+  id             String           @id @default(cuid())
+  organizationId String
+  title          String
+  vendor         String?
+  category       String
+  incurredAt     DateTime         @default(now())
+  amountCents    Int
+  status         ErpExpenseStatus @default(PENDING)
+  notes          String?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  organization   Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, status, incurredAt])
+  @@index([organizationId, category])
 }
