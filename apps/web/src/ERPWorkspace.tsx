@@ -27,7 +27,7 @@ export default function ERPWorkspace({organizationId,role}:Props){
  }catch(e){setError(e instanceof Error?e.message:'Unable to load ERP records')}finally{setLoading(false)}},[organizationId]);
  useEffect(()=>{void load()},[load]);
  async function submit(e:FormEvent<HTMLFormElement>){e.preventDefault();setSaving(true);setError('');setNotice('');try{
-  const isInvoice=tab==='invoices';const d=isInvoice?invoice:expense;
+  const isInvoice=tab==='invoices';
   const payload=isInvoice?{...invoice,amount:Number(invoice.amount)}:{...expense,amount:Number(expense.amount)};
   const r=await fetch('/api/organizations/'+organizationId+'/erp/'+(isInvoice?'invoices':'expenses'),{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
   const b=await r.json();if(!r.ok)throw new Error(b.error??'Unable to save record');
