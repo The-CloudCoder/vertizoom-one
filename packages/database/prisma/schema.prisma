@@ -13,9 +13,20 @@ enum EmploymentStatus {
   INACTIVE
 }
 
-enum CrmCustomerStatus { PROSPECT ACTIVE INACTIVE }
+enum CrmCustomerStatus {
+  PROSPECT
+  ACTIVE
+  INACTIVE
+}
 
-enum CrmLeadStage { NEW QUALIFIED PROPOSAL NEGOTIATION WON LOST }
+enum CrmLeadStage {
+  NEW
+  QUALIFIED
+  PROPOSAL
+  NEGOTIATION
+  WON
+  LOST
+}
 
 enum MembershipRole {
   OWNER
