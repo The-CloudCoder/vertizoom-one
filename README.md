@@ -78,6 +78,8 @@ The initial schema includes users, organizations, organization membership and st
 
 ## AWS direction
 
+See [docs/aws-mvp-plan.md](docs/aws-mvp-plan.md) for the budget-conscious AWS Mumbai deployment plan and [docs/local-development.md](docs/local-development.md) for the local PostgreSQL workflow.
+
 Use Amazon RDS for PostgreSQL in private subnets. Permit database connections only from the API's security group, enforce TLS, enable backups, and store production credentials in AWS Secrets Manager. Use S3 for uploads and exports rather than storing file bodies in the relational database.
 
 The repository does not provision AWS resources or deploy itself yet. Add infrastructure as code, CI/CD, monitoring, restore tests, and production security review before launch. Never commit production credentials or real customer data.
