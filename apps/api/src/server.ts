@@ -1,4 +1,10 @@
-import 'dotenv/config';
+import dotenv from 'dotenv';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+// Load the single root-level .env from both src and compiled dist locations.
+const currentDir = dirname(fileURLToPath(import.meta.url));
+dotenv.config({ path: resolve(currentDir, '../../../.env') });
 import cors from 'cors';
 import express from 'express';
 import helmet from 'helmet';
