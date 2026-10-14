@@ -318,7 +318,7 @@ export function createApp() {
     };
     for (const [key, value] of Object.entries(fields)) {
       const max = ({ legalName: 160, logoUrl: 2048, addressLine1: 160, addressLine2: 160, city: 100, state: 100, postalCode: 20, country: 100, phone: 30, website: 255, gstin: 15, pan: 10, paymentTerms: 500, bankAccountName: 120, bankName: 120, bankAccountNumber: 34, bankIfsc: 11, upiId: 100 } as Record<string, number>)[key];
-      if (value === undefined) return response.status(400).json({ error: key + ' must be a text value no longer than ' + max + ' characters' });
+      if (key in body && value === undefined) return response.status(400).json({ error: key + ' must be a text value no longer than ' + max + ' characters' });
     }
     const businessEmail = optionalText('businessEmail', 254);
     if ('businessEmail' in body && (businessEmail === undefined || (businessEmail && !normalizeEmail(businessEmail)))) return response.status(400).json({ error: 'Enter a valid business email address' });
