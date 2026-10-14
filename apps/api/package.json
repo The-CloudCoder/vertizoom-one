@@ -15,7 +15,8 @@
     "express": "^4.21.2",
     "helmet": "^8.0.0",
     "pino": "^9.6.0",
-    "pino-http": "^10.4.0"
+    "pino-http": "^10.4.0",
+    "@vertizoom/database": "0.1.0"
   },
   "devDependencies": {
     "@types/cors": "^2.8.17",
