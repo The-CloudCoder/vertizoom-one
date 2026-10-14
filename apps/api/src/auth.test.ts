@@ -180,3 +180,29 @@ test('CRM customer, contact, and lead records are organization-scoped', async ()
   const foreignCustomer=((await otherRes.json()) as {customer:{id:string}}).customer;
   const cross=await request(`/api/organizations/${orgA.id}/crm/leads`,{method:'POST',body:json({title:'Foreign lead',customerId:foreignCustomer.id})},ownerA);assert.equal(cross.status,400);
 });
+
+
+test('ERP invoices and expenses are validated and isolated by organization', async () => {
+  const ownerA: Client = {}, ownerB: Client = {};
+  await request('/api/auth/login', { method: 'POST', body: json({ email: 'owner@example.com', password: 'correct horse battery staple' }) }, ownerA);
+  await request('/api/auth/login', { method: 'POST', body: json({ email: 'owner-b@example.com', password: 'another correct horse battery staple' }) }, ownerB);
+  const orgA=(await (await request('/api/organizations',{},ownerA)).json() as {organizations:Array<{id:string}>}).organizations[0]!;
+  const orgB=(await (await request('/api/organizations',{},ownerB)).json() as {organizations:Array<{id:string}>}).organizations[0]!;
+
+  const invoiceResponse=await request(`/api/organizations/${orgA.id}/erp/invoices`,{method:'POST',body:json({invoiceNumber:'INV-TEST-001',customerName:'Example Customer',amount:12500,dueDate:'2026-11-01'})},ownerA);
+  assert.equal(invoiceResponse.status,201);
+  const invoice=((await invoiceResponse.json()) as {invoice:{id:string;amountCents:number;status:string}}).invoice;
+  assert.equal(invoice.amountCents,1250000);assert.equal(invoice.status,'DRAFT');
+  assert.equal((await request(`/api/organizations/${orgA.id}/erp/invoices`,{method:'POST',body:json({invoiceNumber:'INV-TEST-001',customerName:'Duplicate',amount:100})},ownerA)).status,409);
+  assert.equal((await request(`/api/organizations/${orgB.id}/erp/invoices`,{},ownerA)).status,404);
+  assert.equal((await request(`/api/organizations/${orgB.id}/erp/invoices/${invoice.id}/status`,{method:'PATCH',body:json({status:'PAID'})},ownerA)).status,404);
+  assert.equal((await request(`/api/organizations/${orgA.id}/erp/invoices/${invoice.id}/status`,{method:'PATCH',body:json({status:'PAID'})},ownerA)).status,200);
+
+  const expenseResponse=await request(`/api/organizations/${orgA.id}/erp/expenses`,{method:'POST',body:json({title:'Cloud hosting',category:'Infrastructure',vendor:'Cloud provider',amount:2500,incurredAt:'2026-10-14'})},ownerA);
+  assert.equal(expenseResponse.status,201);
+  const expense=((await expenseResponse.json()) as {expense:{id:string;amountCents:number;status:string}}).expense;
+  assert.equal(expense.amountCents,250000);assert.equal(expense.status,'PENDING');
+  assert.equal((await request(`/api/organizations/${orgB.id}/erp/expenses/${expense.id}/status`,{method:'PATCH',body:json({status:'PAID'})},ownerA)).status,404);
+  assert.equal((await request(`/api/organizations/${orgA.id}/erp/expenses/${expense.id}/status`,{method:'PATCH',body:json({status:'APPROVED'})},ownerA)).status,200);
+  assert.equal((await request(`/api/organizations/${orgA.id}/erp/expenses`,{method:'POST',body:json({title:'Bad amount',category:'Other',amount:-2})},ownerA)).status,400);
+});
