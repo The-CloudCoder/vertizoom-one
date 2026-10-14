@@ -70,6 +70,29 @@ model Organization {
   id          String                @id @default(cuid())
   name        String
   slug        String                @unique
+  legalName   String?
+  logoUrl     String?
+  addressLine1 String?
+  addressLine2 String?
+  city        String?
+  state       String?
+  postalCode  String?
+  country     String?
+  phone       String?
+  businessEmail String?
+  website     String?
+  gstin       String?
+  pan         String?
+  invoicePrefix String @default("INV")
+  nextInvoiceNumber Int @default(1)
+  currency    String @default("INR")
+  defaultTaxRateBps Int @default(0)
+  paymentTerms String?
+  bankAccountName String?
+  bankName    String?
+  bankAccountNumber String?
+  bankIfsc    String?
+  upiId       String?
   createdAt   DateTime              @default(now())
   updatedAt   DateTime              @updatedAt
   memberships OrganizationMember[]
