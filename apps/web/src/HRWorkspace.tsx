@@ -57,7 +57,7 @@ export default function HRWorkspace({ organizationId, role }: Props) {
   async function addEmployee(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setSaving(true); setError(''); setNotice('');
     try {
-      await post('employees', { employeeCode, firstName, lastName, workEmail: workEmail || undefined, jobTitle: jobTitle || undefined, departmentId: departmentId || undefined, startDate: startDate || undefined });
+      await post('employees', { employeeCode, firstName, lastName, workEmail: workEmail || (editingEmployeeId ? null : undefined), jobTitle: jobTitle || (editingEmployeeId ? null : undefined), departmentId: departmentId || (editingEmployeeId ? null : undefined), startDate: startDate || (editingEmployeeId ? null : undefined) });
       setEmployeeForm(false); setEmployeeCode(''); setFirstName(''); setLastName(''); setWorkEmail(''); setJobTitle(''); setDepartmentId(''); setStartDate('');
       setNotice('Employee added to your organization.'); await load();
     } catch (e) { setError(e instanceof Error ? e.message : 'Unable to add employee'); }
