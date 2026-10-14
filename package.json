@@ -11,11 +11,12 @@
   "scripts": {
     "dev": "concurrently -k -n web,api -c blue,green \"npm run dev -w @vertizoom/web\" \"npm run dev -w @vertizoom/api\"",
     "build": "npm run build -w @vertizoom/web && npm run build -w @vertizoom/database && npm run build -w @vertizoom/api",
-    "typecheck": "npm run typecheck -w @vertizoom/web && npm run typecheck -w @vertizoom/database && npm run typecheck -w @vertizoom/api",
+    "typecheck": "npm run typecheck -w @vertizoom/web && npm run db:generate && npm run build -w @vertizoom/database && npm run typecheck -w @vertizoom/api",
     "db:generate": "npm run generate -w @vertizoom/database",
     "db:migrate": "npm run migrate:dev -w @vertizoom/database",
     "db:deploy": "npm run migrate:deploy -w @vertizoom/database",
-    "db:studio": "npm run studio -w @vertizoom/database"
+    "db:studio": "npm run studio -w @vertizoom/database",
+    "postinstall": "npm run db:generate"
   },
   "devDependencies": {
     "concurrently": "^9.1.2",
