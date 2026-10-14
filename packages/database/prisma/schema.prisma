@@ -47,6 +47,7 @@ model Organization {
   auditEvents AuditEvent[]
   departments Department[]
   employees Employee[]
+  invitations OrganizationInvitation[]
 
   @@index([createdAt])
 }
