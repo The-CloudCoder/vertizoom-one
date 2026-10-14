@@ -6,7 +6,7 @@ import helmet from 'helmet';
 import pino from 'pino';
 import { pinoHttp } from 'pino-http';
 import { prisma } from '@vertizoom/database';
-import { MembershipRole } from '@prisma/client';
+import { MembershipRole, Prisma } from '@prisma/client';
 
 const scrypt = promisify(scryptCallback);
 const SESSION_COOKIE = 'vz_session';
@@ -321,7 +321,7 @@ export function createApp() {
       if (value === undefined) return response.status(400).json({ error: key + ' must be a text value no longer than ' + max + ' characters' });
     }
     const businessEmail = optionalText('businessEmail', 254);
-    if (businessEmail === undefined || (businessEmail && !normalizeEmail(businessEmail))) return response.status(400).json({ error: 'Enter a valid business email address' });
+    if ('businessEmail' in body && (businessEmail === undefined || (businessEmail && !normalizeEmail(businessEmail)))) return response.status(400).json({ error: 'Enter a valid business email address' });
     const logoUrl = fields.logoUrl;
     const website = fields.website;
     for (const [label, value] of [['Logo URL', logoUrl], ['Website', website]] as const) {
@@ -342,7 +342,7 @@ export function createApp() {
     if (fields.pan && !/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(fields.pan.toUpperCase())) return response.status(400).json({ error: 'PAN format is invalid' });
     if (fields.bankIfsc && !/^[A-Z]{4}0[A-Z0-9]{6}$/.test(fields.bankIfsc.toUpperCase())) return response.status(400).json({ error: 'IFSC format is invalid' });
     try {
-      const data: Record<string, unknown> = {};
+      const data: Prisma.OrganizationUpdateInput = {};
       for (const [key, value] of Object.entries(fields)) if (value !== undefined) data[key] = ['gstin', 'pan', 'bankIfsc'].includes(key) && value ? value.toUpperCase() : value;
       if (businessEmail !== undefined) data.businessEmail = businessEmail ? normalizeEmail(businessEmail) : null;
       if (invoicePrefix !== undefined) data.invoicePrefix = invoicePrefix;
