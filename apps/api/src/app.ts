@@ -272,6 +272,103 @@ export function createApp() {
     }
   });
 
+
+  // Company profile and invoice defaults are organization-scoped.
+  app.get('/api/organizations/:organizationId/profile', requireAuth, requireOrganizationRole(), async (request, response) => {
+    try {
+      const organization = await prisma.organization.findUnique({
+        where: { id: request.params.organizationId! },
+        select: {
+          id: true, name: true, slug: true, legalName: true, logoUrl: true,
+          addressLine1: true, addressLine2: true, city: true, state: true,
+          postalCode: true, country: true, phone: true, businessEmail: true,
+          website: true, gstin: true, pan: true, invoicePrefix: true,
+          nextInvoiceNumber: true, currency: true, defaultTaxRateBps: true,
+          paymentTerms: true, bankAccountName: true, bankName: true,
+          bankAccountNumber: true, bankIfsc: true, upiId: true,
+        },
+      });
+      if (!organization) return response.status(404).json({ error: 'Organization not found' });
+      return response.status(200).json({ profile: organization });
+    } catch (error) {
+      logger.error({ err: error }, 'Company profile retrieval failed');
+      return response.status(500).json({ error: 'Unable to load company profile' });
+    }
+  });
+
+  app.patch('/api/organizations/:organizationId/profile', requireAuth, requireOrganizationRole(MembershipRole.OWNER, MembershipRole.ADMIN), async (request, response) => {
+    const body = request.body ?? {};
+    const optionalText = (key: string, max: number): string | null | undefined => {
+      if (!(key in body)) return undefined;
+      if (body[key] == null || body[key] === '') return null;
+      if (typeof body[key] !== 'string') return undefined;
+      const value = body[key].trim();
+      return value.length <= max ? (value || null) : undefined;
+    };
+    const fields = {
+      legalName: optionalText('legalName', 160), logoUrl: optionalText('logoUrl', 2048),
+      addressLine1: optionalText('addressLine1', 160), addressLine2: optionalText('addressLine2', 160),
+      city: optionalText('city', 100), state: optionalText('state', 100),
+      postalCode: optionalText('postalCode', 20), country: optionalText('country', 100),
+      phone: optionalText('phone', 30), website: optionalText('website', 255),
+      gstin: optionalText('gstin', 15), pan: optionalText('pan', 10),
+      paymentTerms: optionalText('paymentTerms', 500), bankAccountName: optionalText('bankAccountName', 120),
+      bankName: optionalText('bankName', 120), bankAccountNumber: optionalText('bankAccountNumber', 34),
+      bankIfsc: optionalText('bankIfsc', 11), upiId: optionalText('upiId', 100),
+    };
+    for (const [key, value] of Object.entries(fields)) {
+      const max = ({ legalName: 160, logoUrl: 2048, addressLine1: 160, addressLine2: 160, city: 100, state: 100, postalCode: 20, country: 100, phone: 30, website: 255, gstin: 15, pan: 10, paymentTerms: 500, bankAccountName: 120, bankName: 120, bankAccountNumber: 34, bankIfsc: 11, upiId: 100 } as Record<string, number>)[key];
+      if (value === undefined) return response.status(400).json({ error: key + ' must be a text value no longer than ' + max + ' characters' });
+    }
+    const businessEmail = optionalText('businessEmail', 254);
+    if (businessEmail === undefined || (businessEmail && !normalizeEmail(businessEmail))) return response.status(400).json({ error: 'Enter a valid business email address' });
+    const logoUrl = fields.logoUrl;
+    const website = fields.website;
+    for (const [label, value] of [['Logo URL', logoUrl], ['Website', website]] as const) {
+      if (value) {
+        try { const url = new URL(value); if (url.protocol !== 'https:' && url.protocol !== 'http:') throw new Error(); }
+        catch { return response.status(400).json({ error: label + ' must be a valid HTTP or HTTPS URL' }); }
+      }
+    }
+    const invoicePrefix = body.invoicePrefix == null ? undefined : typeof body.invoicePrefix === 'string' ? body.invoicePrefix.trim().toUpperCase() : '';
+    const nextInvoiceNumber = body.nextInvoiceNumber == null ? undefined : Number(body.nextInvoiceNumber);
+    const currency = body.currency == null ? undefined : typeof body.currency === 'string' ? body.currency.trim().toUpperCase() : '';
+    const taxValue = body.defaultTaxRate == null ? undefined : Number(body.defaultTaxRate);
+    if (invoicePrefix !== undefined && !/^[A-Z0-9-]{1,12}$/.test(invoicePrefix)) return response.status(400).json({ error: 'Invoice prefix must be 1–12 letters, numbers, or hyphens' });
+    if (nextInvoiceNumber !== undefined && (!Number.isSafeInteger(nextInvoiceNumber) || nextInvoiceNumber < 1 || nextInvoiceNumber > 2147483647)) return response.status(400).json({ error: 'Next invoice number must be a positive whole number' });
+    if (currency !== undefined && !/^[A-Z]{3}$/.test(currency)) return response.status(400).json({ error: 'Currency must be a 3-letter currency code' });
+    if (taxValue !== undefined && (!Number.isFinite(taxValue) || taxValue < 0 || taxValue > 100 || Math.round(taxValue * 100) !== taxValue * 100)) return response.status(400).json({ error: 'Default tax rate must be between 0 and 100 with up to 2 decimal places' });
+    if (fields.gstin && !/^[0-9A-Z]{15}$/.test(fields.gstin.toUpperCase())) return response.status(400).json({ error: 'GSTIN must contain 15 letters or numbers' });
+    if (fields.pan && !/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(fields.pan.toUpperCase())) return response.status(400).json({ error: 'PAN format is invalid' });
+    if (fields.bankIfsc && !/^[A-Z]{4}0[A-Z0-9]{6}$/.test(fields.bankIfsc.toUpperCase())) return response.status(400).json({ error: 'IFSC format is invalid' });
+    try {
+      const data: Record<string, unknown> = {};
+      for (const [key, value] of Object.entries(fields)) if (value !== undefined) data[key] = ['gstin', 'pan', 'bankIfsc'].includes(key) && value ? value.toUpperCase() : value;
+      if (businessEmail !== undefined) data.businessEmail = businessEmail ? normalizeEmail(businessEmail) : null;
+      if (invoicePrefix !== undefined) data.invoicePrefix = invoicePrefix;
+      if (nextInvoiceNumber !== undefined) data.nextInvoiceNumber = nextInvoiceNumber;
+      if (currency !== undefined) data.currency = currency;
+      if (taxValue !== undefined) data.defaultTaxRateBps = Math.round(taxValue * 100);
+      const profile = await prisma.organization.update({
+        where: { id: request.params.organizationId! }, data,
+        select: {
+          id: true, name: true, slug: true, legalName: true, logoUrl: true,
+          addressLine1: true, addressLine2: true, city: true, state: true,
+          postalCode: true, country: true, phone: true, businessEmail: true,
+          website: true, gstin: true, pan: true, invoicePrefix: true,
+          nextInvoiceNumber: true, currency: true, defaultTaxRateBps: true,
+          paymentTerms: true, bankAccountName: true, bankName: true,
+          bankAccountNumber: true, bankIfsc: true, upiId: true,
+        },
+      });
+      await prisma.auditEvent.create({ data: { organizationId: profile.id, actorUserId: request.auth!.userId, action: 'organization.company_profile_updated', entityType: 'Organization', entityId: profile.id } });
+      return response.status(200).json({ profile });
+    } catch (error) {
+      logger.error({ err: error }, 'Company profile update failed');
+      return response.status(500).json({ error: 'Unable to save company profile' });
+    }
+  });
+
   app.get('/api/organizations/:organizationId/audit-events', requireAuth, requireOrganizationRole(), async (request, response) => {
     const organizationId = request.params.organizationId!;
     try {
